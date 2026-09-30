@@ -1,0 +1,10 @@
+(decl partial SimplifyMemory (Link) LinkPair)
+
+(rule
+	(SimplifyMemory
+		(I32Load memory @ (I32Store _ offset source) offset)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ForwardI32LoadFromStore)))
+
+	(LinkPair.Pair source memory)
+)

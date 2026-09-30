@@ -1,0 +1,5 @@
+(decl RefIsNull (Link) Link)
+(extern extractor RefIsNull get_ref_is_null)
+
+(decl Null () Link)
+(extern extractor Null get_null)

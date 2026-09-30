@@ -1,0 +1,10 @@
+(decl partial SimplifyAggregate (Link) Link)
+
+(rule
+	(SimplifyAggregate
+		(ExtractOfAggregate field)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ForwardAggregateExtraction)))
+
+	field
+)

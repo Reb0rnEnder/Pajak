@@ -1,0 +1,12 @@
+[package]
+name = "luajit-lower"
+version = "1.0.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+ir-graph.workspace = true
+ir-passes.workspace = true
+luajit-foreign.workspace = true

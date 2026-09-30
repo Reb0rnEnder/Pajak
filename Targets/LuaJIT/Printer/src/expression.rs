@@ -1,15 +1,12 @@
+use alloc::sync::Arc;
 use std::io::{Result, Write};
 
 use luajit_tree::expression::{
-	BooleanToInteger, Call, Expression, Function, GlobalGet, GlobalNew, Import,
-	IntegerBinaryOperation, IntegerCompareOperation, IntegerConvertToNumber, IntegerExtend,
-	IntegerNarrow, IntegerTransmuteToNumber, IntegerUnaryOperation, IntegerWiden, Local, Location,
-	MemoryGrow, MemoryLoad, MemoryNew, MemorySize, Name, NumberBinaryOperation,
-	NumberCompareOperation, NumberNarrow, NumberTransmuteToInteger, NumberTruncateToInteger,
-	NumberUnaryOperation, NumberWiden, RefIsNull, Scoped, TableGet, TableGrow, TableNew, TableSize,
+	Aggregate, Apply, BooleanToInteger, Call, Expression, Extract, Field, Function, Index, Infix,
+	Local, MemoryNew, Name, Prefix, RefIsNull, TableNew,
 };
 
-use crate::{LuaJITPrinter, library::NeedsName, print::Print};
+use super::{LuaJITPrinter, library::NeedsName as _, print::Print};
 
 pub fn fmt_delimited<T, I>(items: I, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()>
 where
@@ -30,25 +27,65 @@ where
 	}
 }
 
-pub fn fmt_stack_enter(size: u16, printer: &LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-	if size == 0 {
+// A trailing argument that is itself a multi-value call (e.g. `from_bits_i64`)
+// would otherwise spill its extra results into the call; parenthesizing the
+// final argument collapses it to the single value the call position intends.
+fn fmt_arguments(
+	arguments: &[Expression],
+	printer: &mut LuaJITPrinter,
+	out: &mut dyn Write,
+) -> Result<()> {
+	let Some((last, leading)) = arguments.split_last() else {
 		return Ok(());
+	};
+
+	for argument in leading {
+		argument.print(printer, out)?;
+
+		write!(out, ", ")?;
 	}
 
-	printer.tab(out)?;
-	writeln!(out, "local stack_top = excess_stack.top + {size}")?;
+	write!(out, "(")?;
 
-	printer.tab(out)?;
-	writeln!(out, "excess_stack.top = stack_top")
+	last.print(printer, out)?;
+
+	write!(out, ")")
 }
 
-pub fn fmt_stack_leave(size: u16, printer: &LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+fn fmt_stack_enter(size: u16, printer: &LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
 	if size == 0 {
 		return Ok(());
 	}
 
-	printer.tab(out)?;
-	writeln!(out, "excess_stack.top = stack_top - {size}")
+	printer.write_indent(out)?;
+	writeln!(out, "local stack = stack_acquire({size})")
+}
+
+fn fmt_stack_leave(size: u16, printer: &LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+	if size == 0 {
+		return Ok(());
+	}
+
+	printer.write_indent(out)?;
+	writeln!(out, "stack_release({size}, stack)")
+}
+
+fn fmt_infix_operator(
+	lhs: &Expression,
+	rhs: &Expression,
+	operator: &'static str,
+	printer: &mut LuaJITPrinter,
+	out: &mut dyn Write,
+) -> Result<()> {
+	write!(out, "(")?;
+
+	lhs.print(printer, out)?;
+
+	write!(out, ") {operator} (")?;
+
+	rhs.print(printer, out)?;
+
+	write!(out, ")")
 }
 
 impl Print for Name {
@@ -60,12 +97,12 @@ impl Print for Name {
 	}
 }
 
-pub fn fmt_locals(names: &[Name], printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+fn fmt_locals(names: &[Name], printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
 	if names.is_empty() {
 		return Ok(());
 	}
 
-	printer.tab(out)?;
+	printer.write_indent(out)?;
 	write!(out, "local ")?;
 
 	fmt_delimited(names, printer, out)?;
@@ -78,7 +115,7 @@ impl Print for Local {
 		match self {
 			Self::Fast { name } => name.print(printer, out),
 			Self::Slow { offset } => {
-				write!(out, "excess_stack[stack_top - {offset}]")
+				write!(out, "stack[{}]", offset + 1)
 			}
 		}
 	}
@@ -110,7 +147,7 @@ impl Print for Function {
 		fmt_stack_leave(*stack, printer, out)?;
 
 		if !returns.is_empty() {
-			printer.tab(out)?;
+			printer.write_indent(out)?;
 			write!(out, "return ")?;
 
 			fmt_delimited(returns, printer, out)?;
@@ -120,66 +157,8 @@ impl Print for Function {
 
 		printer.outdent();
 
-		printer.tab(out)?;
+		printer.write_indent(out)?;
 		write!(out, "end)")
-	}
-}
-
-impl Print for Scoped {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self {
-			dependencies,
-			function,
-		} = self;
-
-		if dependencies.is_empty() {
-			return function.print(printer, out);
-		}
-
-		writeln!(out, "(function()")?;
-
-		printer.indent();
-
-		for (name, source) in dependencies {
-			printer.tab(out)?;
-			write!(out, "local ")?;
-
-			name.print(printer, out)?;
-			write!(out, " = ")?;
-			source.print(printer, out)?;
-			writeln!(out, ";")?;
-		}
-
-		printer.tab(out)?;
-		write!(out, "return ")?;
-		function.print(printer, out)?;
-		writeln!(out)?;
-
-		printer.outdent();
-		printer.tab(out)?;
-		write!(out, "end)()")
-	}
-}
-
-impl Print for Import {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self {
-			environment,
-			namespace,
-			identifier,
-		} = self;
-
-		write!(out, "assert(")?;
-
-		environment.print(printer, out)?;
-
-		let namespace = namespace.as_bytes().escape_ascii();
-		let identifier = identifier.as_bytes().escape_ascii();
-
-		write!(
-			out,
-			"[\"{namespace}\"][\"{identifier}\"], '`{namespace}.{identifier}` should be present')"
-		)
 	}
 }
 
@@ -199,7 +178,7 @@ impl Print for f32 {
 	fn print(&self, _printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
 		let bits = i32::from_ne_bytes(self.to_ne_bytes());
 
-		write!(out, "{bits} --[[ {self}_f32 ]]")
+		write!(out, "{bits}")
 	}
 }
 
@@ -207,7 +186,15 @@ impl Print for f64 {
 	fn print(&self, _printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
 		let bits = i64::from_ne_bytes(self.to_ne_bytes());
 
-		write!(out, "{bits}LL --[[ {self}_f64 ]]")
+		write!(out, "{bits}LL")
+	}
+}
+
+impl Print for Arc<str> {
+	fn print(&self, _printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		let escaped = self.as_bytes().escape_ascii();
+
+		write!(out, "\"{escaped}\"")
 	}
 }
 
@@ -222,7 +209,37 @@ impl Print for Call {
 
 		write!(out, "(")?;
 
-		fmt_delimited(arguments, printer, out)?;
+		fmt_arguments(arguments, printer, out)?;
+
+		write!(out, ")")
+	}
+}
+
+impl<const N: usize> Print for Apply<N> {
+	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		write!(out, "{}(", self.name)?;
+
+		fmt_arguments(&self.arguments, printer, out)?;
+
+		write!(out, ")")
+	}
+}
+
+impl Print for Infix {
+	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		let Self { operator, lhs, rhs } = self;
+
+		fmt_infix_operator(lhs, rhs, operator, printer, out)
+	}
+}
+
+impl Print for Prefix {
+	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		let Self { operator, source } = self;
+
+		write!(out, "{operator}(")?;
+
+		source.print(printer, out)?;
 
 		write!(out, ")")
 	}
@@ -252,263 +269,59 @@ impl Print for RefIsNull {
 	}
 }
 
-impl Print for IntegerUnaryOperation {
+impl Print for Aggregate {
 	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerBinaryOperation {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { lhs, rhs, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		lhs.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		rhs.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerCompareOperation {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { lhs, rhs, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		lhs.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		rhs.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerNarrow {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerWiden {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerExtend {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerConvertToNumber {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for IntegerTransmuteToNumber {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberUnaryOperation {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberBinaryOperation {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { lhs, rhs, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		lhs.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		rhs.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberCompareOperation {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { lhs, rhs, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		lhs.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		rhs.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberNarrow {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberWiden {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberTruncateToInteger {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for NumberTransmuteToInteger {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for Location {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { reference, offset } = self;
-
-		reference.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		offset.print(printer, out)
-	}
-}
-
-impl Print for GlobalNew {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { initializer } = self;
+		let Self { fields } = self;
 
 		write!(out, "{{ ")?;
 
-		initializer.print(printer, out)?;
+		for field in fields {
+			field.print(printer, out)?;
 
-		write!(out, " }}")
+			write!(out, ", ")?;
+		}
+
+		write!(out, "}}")
 	}
 }
 
-impl Print for GlobalGet {
+impl Print for Extract {
 	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
+		let Self { source, index } = self;
+
+		write!(out, "(")?;
 
 		source.print(printer, out)?;
 
-		write!(out, "[1]")
+		write!(out, ")[{}]", index + 1)
+	}
+}
+
+impl Print for Field {
+	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		let Self { source, name } = self;
+
+		write!(out, "(")?;
+
+		source.print(printer, out)?;
+
+		write!(out, ").{name}")
+	}
+}
+
+impl Print for Index {
+	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		let Self { source, offset } = self;
+
+		write!(out, "(")?;
+
+		source.print(printer, out)?;
+
+		write!(out, ")[")?;
+
+		offset.print(printer, out)?;
+
+		write!(out, "]")
 	}
 }
 
@@ -536,63 +349,9 @@ impl Print for TableNew {
 	}
 }
 
-impl Print for TableGet {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for TableSize {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		source.print(printer, out)?;
-
-		write!(out, ".minimum")
-	}
-}
-
-impl Print for TableGrow {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self {
-			destination,
-			initializer,
-			size,
-		} = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		destination.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		initializer.print(printer, out)?;
-
-		write!(out, ", ")?;
-
-		size.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
 impl Print for MemoryNew {
-	fn print(&self, _printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self {
-			initializer,
-			minimum,
-			maximum,
-		} = self;
+	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
+		let Self { initializer, size } = self;
 
 		let intrinsic = self.needs_name();
 
@@ -602,49 +361,7 @@ impl Print for MemoryNew {
 			write!(out, "[{offset}] = \"{}\", ", data.escape_ascii())?;
 		}
 
-		write!(out, "}}, {minimum}, {maximum})")
-	}
-}
-
-impl Print for MemoryLoad {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source, .. } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for MemorySize {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { source } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		source.print(printer, out)?;
-
-		write!(out, ")")
-	}
-}
-
-impl Print for MemoryGrow {
-	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		let Self { destination, size } = self;
-
-		let intrinsic = self.needs_name();
-
-		write!(out, "rt_{intrinsic}(")?;
-
-		destination.print(printer, out)?;
-
-		write!(out, ", ")?;
+		write!(out, "}}, ")?;
 
 		size.print(printer, out)?;
 
@@ -654,10 +371,8 @@ impl Print for MemoryGrow {
 
 impl Print for Expression {
 	fn print(&self, printer: &mut LuaJITPrinter, out: &mut dyn Write) -> Result<()> {
-		match self {
+		stacker::maybe_grow(0x1_0000, 0x10_0000, || match self {
 			Self::Function(function) => function.print(printer, out),
-			Self::Scoped(scoped) => scoped.print(printer, out),
-			Self::Import(import) => import.print(printer, out),
 			Self::Trap => write!(out, "error('unreachable code')"),
 			Self::Null => write!(out, "nil"),
 			Self::Local(local) => local.print(printer, out),
@@ -665,54 +380,24 @@ impl Print for Expression {
 			Self::I64(i64) => i64.print(printer, out),
 			Self::F32(f32) => f32.print(printer, out),
 			Self::F64(f64) => f64.print(printer, out),
+			Self::String(string) => string.print(printer, out),
 			Self::Call(call) => call.print(printer, out),
+			Self::Apply0Arguments(apply) => apply.print(printer, out),
+			Self::Apply1Argument(apply) => apply.print(printer, out),
+			Self::Apply2Arguments(apply) => apply.print(printer, out),
+			Self::Apply3Arguments(apply) => apply.print(printer, out),
+			Self::Apply4Arguments(apply) => apply.print(printer, out),
+			Self::Apply5Arguments(apply) => apply.print(printer, out),
+			Self::Infix(infix) => infix.print(printer, out),
+			Self::Prefix(prefix) => prefix.print(printer, out),
 			Self::BooleanToInteger(boolean_to_integer) => boolean_to_integer.print(printer, out),
 			Self::RefIsNull(ref_is_null) => ref_is_null.print(printer, out),
-			Self::IntegerUnaryOperation(integer_unary_operation) => {
-				integer_unary_operation.print(printer, out)
-			}
-			Self::IntegerBinaryOperation(integer_binary_operation) => {
-				integer_binary_operation.print(printer, out)
-			}
-			Self::IntegerCompareOperation(integer_compare_operation) => {
-				integer_compare_operation.print(printer, out)
-			}
-			Self::IntegerNarrow(integer_narrow) => integer_narrow.print(printer, out),
-			Self::IntegerWiden(integer_widen) => integer_widen.print(printer, out),
-			Self::IntegerExtend(integer_extend) => integer_extend.print(printer, out),
-			Self::IntegerConvertToNumber(integer_convert_to_number) => {
-				integer_convert_to_number.print(printer, out)
-			}
-			Self::IntegerTransmuteToNumber(integer_transmute_to_number) => {
-				integer_transmute_to_number.print(printer, out)
-			}
-			Self::NumberUnaryOperation(number_unary_operation) => {
-				number_unary_operation.print(printer, out)
-			}
-			Self::NumberBinaryOperation(number_binary_operation) => {
-				number_binary_operation.print(printer, out)
-			}
-			Self::NumberCompareOperation(number_compare_operation) => {
-				number_compare_operation.print(printer, out)
-			}
-			Self::NumberNarrow(number_narrow) => number_narrow.print(printer, out),
-			Self::NumberWiden(number_widen) => number_widen.print(printer, out),
-			Self::NumberTruncateToInteger(number_truncate_to_integer) => {
-				number_truncate_to_integer.print(printer, out)
-			}
-			Self::NumberTransmuteToInteger(number_transmute_to_integer) => {
-				number_transmute_to_integer.print(printer, out)
-			}
-			Self::GlobalNew(global_new) => global_new.print(printer, out),
-			Self::GlobalGet(global_get) => global_get.print(printer, out),
+			Self::Aggregate(aggregate) => aggregate.print(printer, out),
+			Self::Extract(extract) => extract.print(printer, out),
+			Self::Field(field) => field.print(printer, out),
 			Self::TableNew(table_new) => table_new.print(printer, out),
-			Self::TableGet(table_get) => table_get.print(printer, out),
-			Self::TableSize(table_size) => table_size.print(printer, out),
-			Self::TableGrow(table_grow) => table_grow.print(printer, out),
+			Self::Index(index) => index.print(printer, out),
 			Self::MemoryNew(memory_new) => memory_new.print(printer, out),
-			Self::MemoryLoad(memory_load) => memory_load.print(printer, out),
-			Self::MemorySize(memory_size) => memory_size.print(printer, out),
-			Self::MemoryGrow(memory_grow) => memory_grow.print(printer, out),
-		}
+		})
 	}
 }

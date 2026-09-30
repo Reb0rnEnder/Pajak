@@ -1,0 +1,10 @@
+(decl partial SimplifyTable (Link) LinkPair)
+
+(rule
+	(SimplifyTable
+		(TableGet table @ (TableSet _ offset source) offset)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ForwardTableGetFromSet)))
+
+	(LinkPair.Pair source table)
+)

@@ -12,10 +12,10 @@ local function rt_count_ones_i32(source)
 	return source
 end
 
--- SECTION leading_zeroes_i32
+-- SECTION leading_zeros_i32
 -- NEEDS bit_lshift
 -- NEEDS bit_rshift
-local function rt_leading_zeroes_i32(source)
+local function rt_leading_zeros_i32(source)
 	if source == 0 then
 		return 32
 	end
@@ -49,10 +49,10 @@ local function rt_leading_zeroes_i32(source)
 	return result
 end
 
--- SECTION trailing_zeroes_i32
+-- SECTION trailing_zeros_i32
 -- NEEDS bit_lshift
 -- NEEDS bit_rshift
-local function rt_trailing_zeroes_i32(source)
+local function rt_trailing_zeros_i32(source)
 	if source == 0 then
 		return 32
 	end
@@ -89,9 +89,7 @@ end
 -- SECTION add_i32
 -- NEEDS force_i32
 local function rt_add_i32(lhs, rhs)
-	local result = lhs + rhs
-
-	result = force_i32(result)
+	local result = force_i32(lhs + rhs)
 
 	return result
 end
@@ -99,9 +97,7 @@ end
 -- SECTION subtract_i32
 -- NEEDS force_i32
 local function rt_subtract_i32(lhs, rhs)
-	local result = lhs - rhs
-
-	result = force_i32(result)
+	local result = force_i32(lhs - rhs)
 
 	return result
 end
@@ -164,7 +160,7 @@ end
 -- NEEDS math_fmod
 local function rt_remainder_s32(lhs, rhs)
 	if rhs == 0 then
-		error("integer divide by zero")
+		error("integer divide by zero", 2)
 	end
 
 	local result = math_fmod(lhs, rhs)
@@ -283,20 +279,6 @@ local function rt_less_than_u32(lhs, rhs)
 	return lhs < rhs
 end
 
--- SECTION greater_than_s32
-local function rt_greater_than_s32(lhs, rhs)
-	return lhs > rhs
-end
-
--- SECTION greater_than_u32
--- NEEDS bit_xor
-local function rt_greater_than_u32(lhs, rhs)
-	lhs = bit_xor(lhs, 0x80000000)
-	rhs = bit_xor(rhs, 0x80000000)
-
-	return lhs > rhs
-end
-
 -- SECTION less_than_equal_s32
 local function rt_less_than_equal_s32(lhs, rhs)
 	return lhs <= rhs
@@ -309,20 +291,6 @@ local function rt_less_than_equal_u32(lhs, rhs)
 	rhs = bit_xor(rhs, 0x80000000)
 
 	return lhs <= rhs
-end
-
--- SECTION greater_than_equal_s32
-local function rt_greater_than_equal_s32(lhs, rhs)
-	return lhs >= rhs
-end
-
--- SECTION greater_than_equal_u32
--- NEEDS bit_xor
-local function rt_greater_than_equal_u32(lhs, rhs)
-	lhs = bit_xor(lhs, 0x80000000)
-	rhs = bit_xor(rhs, 0x80000000)
-
-	return lhs >= rhs
 end
 
 -- SECTION widen_i32

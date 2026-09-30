@@ -1,0 +1,211 @@
+(type Link (primitive Link))
+(type f64 (primitive f64))
+
+(type Optimization extern
+	(enum
+		(ComplementBooleanNot)
+		(ComplementIntegerComparison)
+		(ComplementNumberComparison)
+		(ReduceI32BooleanTableConstant)
+		(ReduceI32BooleanTableIdentity)
+		(ReduceI32BooleanTableComplement)
+		(ReduceI64BooleanTableConstant)
+		(ReduceI64BooleanTableIdentity)
+		(ReduceI64BooleanTableComplement)
+		(ReduceI32TruthTableWithXor)
+		(ReduceI32TruthTableWithIncrement)
+		(ReduceI32TruthTableWithDecrement)
+		(ReduceI32TruthTableWithMask)
+		(ReduceI64TruthTableWithXor)
+		(ReduceI64TruthTableWithIncrement)
+		(ReduceI64TruthTableWithDecrement)
+		(ReduceI64TruthTableWithMask)
+		(ForwardAggregateExtraction)
+		(ForwardI32LoadFromStore)
+		(ForwardMutableGet)
+		(FoldNullReferenceCheck)
+		(ForwardTableGetFromSet)
+		(ReduceDoubleFloatNegation)
+		(ReduceFloatAbsolute)
+		(ReduceBooleanSignExtension)
+		(ReduceNarrowWiden)
+		(ReduceIdempotentSignExtension)
+		(ReduceIntegerTransmuteRoundTrip)
+		(ReduceNumberTransmuteRoundTrip)
+		(ReduceI32AddZero)
+		(ReduceI32SubtractIdentity)
+		(ReduceI32MultiplyIdentity)
+		(ReduceI32AndIdentity)
+		(ReduceI32OrIdentity)
+		(ReduceI32ExclusiveOrIdentity)
+		(ReduceI32ShiftIdentity)
+		(ReduceI32RotateIdentity)
+		(ReduceI32DivideOne)
+		(ReduceI32RemainderOne)
+		(ReduceI32DoubleNegation)
+		(ReassociateI32Constants)
+		(FoldReflexiveI32Comparison)
+		(ReduceI64AddZero)
+		(ReduceI64SubtractIdentity)
+		(ReduceI64MultiplyIdentity)
+		(ReduceI64AndIdentity)
+		(ReduceI64OrIdentity)
+		(ReduceI64ExclusiveOrIdentity)
+		(ReduceI64ShiftIdentity)
+		(ReduceI64RotateIdentity)
+		(ReduceI64DivideOne)
+		(ReduceI64RemainderOne)
+		(ReduceI64DoubleNegation)
+		(ReassociateI64Constants)
+		(FoldReflexiveI64Comparison)
+		(FoldReflexiveNumberOrdering)
+		(ReduceLuauDoubleNegation)
+		(FoldLuauArithmeticConstants)
+		(FuseLuauBit32Constants)
+		(FoldLuauBit32Constants)
+		(FoldLuauBit32Unary)
+		(ReduceLuauBit32ExclusiveOr)
+		(ReduceLuauBit32And)
+		(ReduceLuauBit32Or)
+		(ReduceCanonicalLuauBit32And)
+		(ReduceCanonicalLuauBit32Zero)
+		(FoldLuauReflexiveComparison)
+		(FoldLuauComparisonConstants)
+		(ReduceLuauAbsolute)
+		(ReduceLuauIntegralUnary)
+		(ReduceLuauExtremum)
+		(FoldLuauUnaryConstants)
+		(FoldLuauBinaryConstants)
+		(ReduceLuauSplitRepack)
+		(FoldLuauI64Split)
+		(PushLuauSignFlipThroughSplit)
+		(ReduceLuauDoubleSignFlip)
+		(ReduceLuauRepack)
+		(FoldLuauI64Pack)
+	)
+)
+
+(decl pure OptimizationEnabled (Optimization) bool)
+(extern constructor OptimizationEnabled optimization_enabled)
+
+(type LinkPair
+	(enum
+		(Pair (first Link) (second Link))
+	)
+)
+
+(type IntegerType extern
+	(enum
+		(I32)
+		(I64)
+	)
+)
+
+(type ExtendType extern
+	(enum
+		(I32_S8)
+		(I32_S16)
+		(I64_S8)
+		(I64_S16)
+		(I64_S32)
+	)
+)
+
+(type IntegerUnaryOperator extern
+	(enum
+		(CountOnes)
+		(LeadingZeros)
+		(TrailingZeros)
+	)
+)
+
+(type IntegerBinaryOperator extern
+	(enum
+		(Add)
+		(Subtract)
+		(Multiply)
+		(Divide (is_signed bool))
+		(Remainder (is_signed bool))
+		(And)
+		(Or)
+		(ExclusiveOr)
+		(ShiftLeft)
+		(ShiftRight (is_signed bool))
+		(RotateLeft)
+		(RotateRight)
+	)
+)
+
+(type IntegerCompareOperator extern
+	(enum
+		(Equal)
+		(NotEqual)
+		(LessThan (is_signed bool))
+		(LessThanEqual (is_signed bool))
+	)
+)
+
+(type NumberType extern
+	(enum
+		(F32)
+		(F64)
+	)
+)
+
+(type NumberUnaryOperator extern
+	(enum
+		(Absolute)
+		(Negate)
+		(SquareRoot)
+		(RoundUp)
+		(RoundDown)
+		(Truncate)
+		(Nearest)
+	)
+)
+
+(type NumberCompareOperator extern
+	(enum
+		(Equal)
+		(NotEqual)
+		(LessThan)
+		(LessThanEqual)
+	)
+)
+
+(type LoadType extern
+	(enum
+		(I32_S8)
+		(I32_U8)
+		(I32_S16)
+		(I32_U16)
+		(I32)
+
+		(I64_S8)
+		(I64_U8)
+		(I64_S16)
+		(I64_U16)
+		(I64_S32)
+		(I64_U32)
+		(I64)
+
+		(F32)
+		(F64)
+	)
+)
+
+(type StoreType extern
+	(enum
+		(I32_I8)
+		(I32_I16)
+		(I32)
+
+		(I64_I8)
+		(I64_I16)
+		(I64_I32)
+		(I64)
+
+		(F32)
+		(F64)
+	)
+)

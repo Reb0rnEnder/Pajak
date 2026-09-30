@@ -136,7 +136,6 @@ local function rt_divide_f64(lhs, rhs)
 end
 
 -- SECTION minimum_f64
--- NEEDS bit_and
 -- NEEDS from_bits_f64
 -- NEEDS into_bits_f64
 -- NEEDS math_min
@@ -156,7 +155,6 @@ local function rt_minimum_f64(lhs, rhs)
 end
 
 -- SECTION maximum_f64
--- NEEDS bit_and
 -- NEEDS from_bits_f64
 -- NEEDS into_bits_f64
 -- NEEDS math_max
@@ -214,15 +212,6 @@ local function rt_less_than_f64(lhs, rhs)
 	return lhs < rhs
 end
 
--- SECTION greater_than_f64
--- NEEDS from_bits_f64
-local function rt_greater_than_f64(lhs, rhs)
-	lhs = from_bits_f64(lhs)
-	rhs = from_bits_f64(rhs)
-
-	return lhs > rhs
-end
-
 -- SECTION less_than_equal_f64
 -- NEEDS from_bits_f64
 local function rt_less_than_equal_f64(lhs, rhs)
@@ -230,15 +219,6 @@ local function rt_less_than_equal_f64(lhs, rhs)
 	rhs = from_bits_f64(rhs)
 
 	return lhs <= rhs
-end
-
--- SECTION greater_than_equal_f64
--- NEEDS from_bits_f64
-local function rt_greater_than_equal_f64(lhs, rhs)
-	lhs = from_bits_f64(lhs)
-	rhs = from_bits_f64(rhs)
-
-	return lhs >= rhs
 end
 
 -- SECTION narrow_f64

@@ -1,0 +1,10 @@
+(decl partial SimplifyReference (Link) Link)
+
+(rule
+	(SimplifyReference
+		(RefIsNull (Null))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldNullReferenceCheck)))
+
+	(I32 1)
+)

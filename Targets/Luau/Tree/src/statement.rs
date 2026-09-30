@@ -1,22 +1,23 @@
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+//! Statement types for the Luau tree.
 
-use crate::expression::{Expression, Local, Location};
+use super::expression::{Expression, Local};
 
-pub use data_flow_graph::base::StoreType;
-
+/// A sequence of statements.
 pub struct Sequence {
-	pub list: Vec<Statement>,
+	/// The statements in execution order.
+	pub statements: Vec<Statement>,
 }
 
 impl Sequence {
 	fn as_assign_destination(&self) -> Option<Local> {
-		if let [Statement::Assign(assign)] = self.list.as_slice() {
+		if let [Statement::Assign(assign)] = self.statements.as_slice() {
 			Some(assign.destination)
 		} else {
 			None
 		}
 	}
 
+	/// Returns the common assignment destination across all branches, if any.
 	#[must_use]
 	pub fn as_branch_destination(branches: &[Self]) -> Option<Local> {
 		let mut locals = branches.iter().map(Self::as_assign_destination);
@@ -27,116 +28,86 @@ impl Sequence {
 			.filter(|&local| locals.all(|other| other == Some(local)))
 	}
 
+	/// Extracts the source expression from the single assignment in this sequence.
 	#[must_use]
 	pub fn into_assign_source(mut self) -> Expression {
-		let source = if let Some(Statement::Assign(assign)) = self.list.pop() {
+		if let Some(Statement::Assign(assign)) = self.statements.pop() {
+			if !self.statements.is_empty() {
+				unreachable!("sequence should have only one statement")
+			}
+
 			assign.source
 		} else {
-			panic!("should be an assignment")
-		};
-
-		assert!(self.list.is_empty(), "should be only statement");
-
-		source
+			unreachable!("sequence should end with an assignment statement")
+		}
 	}
 }
 
+/// A conditional match statement.
 pub struct Match {
+	/// The branch sequences.
 	pub branches: Vec<Sequence>,
+	/// The condition expression.
 	pub condition: Expression,
 }
 
+/// A repeat loop.
 pub struct Repeat {
+	/// The loop body.
 	pub code: Sequence,
+	/// The continuation condition; the loop exits when it evaluates to zero.
 	pub condition: Expression,
+	/// The carried-value rotation, run after the body on every continuing pass.
+	pub rotation: Sequence,
 }
 
+/// A local variable assignment.
 pub struct Assign {
+	/// The destination local.
 	pub destination: Local,
+	/// The source expression.
 	pub source: Expression,
 }
 
+/// A cyclic swap of locals.
 pub struct SwapAll {
+	/// The locals to swap, in cycle order.
 	pub locals: Vec<Local>,
 }
 
+/// A call statement binding its results: `r0, r1 = call;` (or just `call;`).
 pub struct Call {
-	pub function: Expression,
+	/// The result locals bound from the call, in port order.
 	pub results: Vec<Local>,
-	pub arguments: Vec<Expression>,
+	/// The call expression performed for its results and side effects.
+	pub call: Expression,
 }
 
-pub struct GlobalSet {
-	pub destination: Expression,
-	pub source: Expression,
+/// A table element write: `(table)[offset] = value`.
+pub struct SetIndex {
+	/// The destination table.
+	pub table: Expression,
+	/// The element offset.
+	pub offset: Expression,
+	/// The value being stored.
+	pub value: Expression,
 }
 
-pub struct TableSet {
-	pub destination: Location,
-	pub source: Expression,
-}
-
-pub struct TableFill {
-	pub destination: Location,
-	pub source: Expression,
-	pub size: Expression,
-}
-
-pub struct TableCopy {
-	pub destination: Location,
-	pub source: Location,
-	pub size: Expression,
-}
-
-pub struct TableDrop {
-	pub source: Expression,
-}
-
-pub struct MemoryStore {
-	pub destination: Location,
-	pub source: Expression,
-	pub r#type: StoreType,
-}
-
-pub struct MemoryFill {
-	pub destination: Location,
-	pub byte: Expression,
-	pub size: Expression,
-}
-
-pub struct MemoryCopy {
-	pub destination: Location,
-	pub source: Location,
-	pub size: Expression,
-}
-
-pub struct MemoryDrop {
-	pub source: Expression,
-}
-
+/// A statement node.
 pub enum Statement {
+	/// A conditional match.
 	Match(Box<Match>),
+	/// A repeat loop.
 	Repeat(Box<Repeat>),
 
+	/// A local variable assignment.
 	Assign(Box<Assign>),
+	/// A cyclic swap of locals.
 	SwapAll(Box<SwapAll>),
 
+	/// A call statement binding its results.
 	Call(Box<Call>),
 
-	GlobalSet(Box<GlobalSet>),
-
-	TableSet(Box<TableSet>),
-	TableFill(Box<TableFill>),
-	TableCopy(Box<TableCopy>),
-	TableDrop(Box<TableDrop>),
-
-	MemoryStore(Box<MemoryStore>),
-	MemoryFill(Box<MemoryFill>),
-	MemoryCopy(Box<MemoryCopy>),
-	MemoryDrop(Box<MemoryDrop>),
-}
-
-pub struct Export {
-	pub identifier: Arc<str>,
-	pub source: Expression,
+	/// A table element write.
+	SetIndex(Box<SetIndex>),
 }

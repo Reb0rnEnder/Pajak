@@ -1,0 +1,39 @@
+(type LuauArithmeticOperator extern
+	(enum
+		(Add)
+		(Subtract)
+		(Multiply)
+		(Divide)
+		(FloorDivide)
+		(Modulo)
+	)
+)
+
+(decl LuauArithmeticOperation (Link Link LuauArithmeticOperator) Link)
+(extern extractor LuauArithmeticOperation get_luau_arithmetic_operation)
+
+(decl pure EvaluateLuauArithmetic (LuauArithmeticOperator f64 f64) f64)
+(extern constructor EvaluateLuauArithmetic evaluate_luau_arithmetic)
+
+(decl partial SimplifyLuauArithmetic (Link) Link)
+
+(rule 2
+	(SimplifyLuauArithmetic
+		(LuauUnaryOperation
+			(LuauUnaryOperation source (LuauUnaryOperator.Negate))
+			(LuauUnaryOperator.Negate)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauDoubleNegation)))
+
+	source
+)
+
+(rule
+	(SimplifyLuauArithmetic
+		(LuauArithmeticOperation (LuauNumber left) (LuauNumber right) operator)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauArithmeticConstants)))
+
+	(raw_luau_number_result (EvaluateLuauArithmetic operator left right))
+)

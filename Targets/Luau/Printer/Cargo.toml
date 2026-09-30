@@ -3,17 +3,11 @@ name = "luau-printer"
 version = "1.0.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
-data-flow-graph = { path = "../../../Data Flow/Graph" }
-data-flow-builder = { path = "../../../Data Flow/Builder" }
-data-flow-visitor = { path = "../../../Data Flow/Visitor" }
-luau-tree = { path = "../Tree" }
-luau-builder = { path = "../Builder" }
-
-clap.workspace = true
 hashbrown.workspace = true
-wasmparser = { workspace = true, features = ["validate"] }
+stacker.workspace = true
 
-[[bin]]
-name = "wasm2luau"
-path = "src/main.rs"
+luau-tree = { path = "../Tree" }

@@ -1,0 +1,7 @@
+(decl NumberUnaryOperation (Link NumberType NumberUnaryOperator) Link)
+(extern extractor NumberUnaryOperation get_number_unary_operation)
+(extern constructor NumberUnaryOperation add_number_unary_operation)
+
+(decl NumberCompareOperation (Link Link NumberType NumberCompareOperator) Link)
+(extern extractor NumberCompareOperation get_number_compare_operation)
+(extern constructor NumberCompareOperation add_number_compare_operation)

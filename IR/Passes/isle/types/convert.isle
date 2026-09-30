@@ -1,0 +1,18 @@
+(decl IntegerNarrow (Link) Link)
+(extern extractor IntegerNarrow get_integer_narrow)
+
+(decl IntegerWiden (Link) Link)
+(extern extractor IntegerWiden get_integer_widen)
+(extern constructor IntegerWiden add_integer_widen)
+
+(decl IntegerSignExtend (Link ExtendType) Link)
+(extern extractor IntegerSignExtend get_integer_sign_extend)
+
+(decl SignExtendIdempotent (Link) Link)
+(extern extractor SignExtendIdempotent get_sign_extend_idempotent)
+
+(decl TransmuteIntRoundTrip (Link) Link)
+(extern extractor TransmuteIntRoundTrip get_transmute_int_round_trip)
+
+(decl TransmuteNumberRoundTrip (Link) Link)
+(extern extractor TransmuteNumberRoundTrip get_transmute_number_round_trip)

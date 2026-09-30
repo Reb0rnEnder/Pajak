@@ -1,0 +1,41 @@
+(type LuauCompareOperator extern
+	(enum
+		(Equal)
+		(NotEqual)
+		(LessThan)
+		(LessThanEqual)
+	)
+)
+
+(decl LuauCompareOperation (Link Link LuauCompareOperator) Link)
+(extern extractor LuauCompareOperation get_luau_compare_operation)
+
+(decl BooleanToInteger (Link) Link)
+(extern extractor BooleanToInteger get_boolean_to_integer)
+
+(decl pure EvaluateLuauComparison (LuauCompareOperator f64 f64) i32)
+(extern constructor EvaluateLuauComparison evaluate_luau_comparison)
+
+(decl partial SimplifyLuauCompare (Link) Link)
+
+(rule 1
+	(SimplifyLuauCompare
+		(BooleanToInteger
+			(LuauCompareOperation value value (LuauCompareOperator.LessThan))
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauReflexiveComparison)))
+
+	(I32 0)
+)
+
+(rule
+	(SimplifyLuauCompare
+		(BooleanToInteger
+			(LuauCompareOperation (LuauNumber left) (LuauNumber right) operator)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauComparisonConstants)))
+
+	(I32 (EvaluateLuauComparison operator left right))
+)

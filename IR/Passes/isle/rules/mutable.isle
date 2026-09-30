@@ -1,0 +1,19 @@
+(decl partial SimplifyMutable (Link) LinkPair)
+
+(rule 2
+	(SimplifyMutable
+		(MutableGet mutable @ (MutableNew source))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ForwardMutableGet)))
+
+	(LinkPair.Pair source mutable)
+)
+
+(rule 1
+	(SimplifyMutable
+		(MutableGet mutable @ (MutableSet _ source))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ForwardMutableGet)))
+
+	(LinkPair.Pair source mutable)
+)

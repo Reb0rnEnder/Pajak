@@ -1,0 +1,17 @@
+(decl MemoryLoad (Link Link LoadType) Link)
+(extern extractor MemoryLoad get_memory_load)
+
+(decl I32Load (Link Link) Link)
+
+(extractor (I32Load memory offset)
+	(MemoryLoad memory offset (LoadType.I32))
+)
+
+(decl MemoryStore (Link Link Link StoreType) Link)
+(extern extractor MemoryStore get_memory_store)
+
+(decl I32Store (Link Link Link) Link)
+
+(extractor (I32Store memory offset source)
+	(MemoryStore memory offset source (StoreType.I32))
+)

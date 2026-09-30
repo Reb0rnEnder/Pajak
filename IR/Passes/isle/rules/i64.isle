@@ -1,0 +1,303 @@
+(rule 3
+	(SimplifyInteger
+		(IntegerAdd lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64AddZero)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerSubtract lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64SubtractIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerMultiply lhs (I64 1) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64MultiplyIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerMultiply _ (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64MultiplyIdentity)))
+
+	(I64 0)
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerAnd _ (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64AndIdentity)))
+
+	(I64 0)
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerAnd lhs (I64 -1) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64AndIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerOr lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64OrIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerOr _ (I64 -1) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64OrIdentity)))
+
+	(I64 -1)
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerExclusiveOr lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64ExclusiveOrIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerShiftLeft lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64ShiftIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerBinaryOperation
+			source
+			(I64 0)
+			(IntegerType.I64)
+			(IntegerBinaryOperator.ShiftRight _)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64ShiftIdentity)))
+
+	source
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerRotateLeft lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64RotateIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerRotateRight lhs (I64 0) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64RotateIdentity)))
+
+	lhs
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerBinaryOperation
+			source
+			(I64 1)
+			(IntegerType.I64)
+			(IntegerBinaryOperator.Divide _)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64DivideOne)))
+
+	source
+)
+
+(rule 3
+	(SimplifyInteger
+		(IntegerBinaryOperation
+			_
+			(I64 1)
+			(IntegerType.I64)
+			(IntegerBinaryOperator.Remainder _)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64RemainderOne)))
+
+	(I64 0)
+)
+
+(rule 4
+	(SimplifyInteger
+		(IntegerSubtract lhs lhs (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64SubtractIdentity)))
+
+	(I64 0)
+)
+
+(rule 4
+	(SimplifyInteger
+		(IntegerExclusiveOr lhs lhs (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64ExclusiveOrIdentity)))
+
+	(I64 0)
+)
+
+(rule 5
+	(SimplifyInteger
+		(IntegerSubtract (I64 0) (IntegerSubtract (I64 0) lhs (IntegerType.I64)) (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64DoubleNegation)))
+
+	lhs
+)
+
+(rule 8
+	(SimplifyInteger
+		(IntegerUnaryOperation (I64 source) (IntegerType.I64) operator)
+	)
+	(if-let true (I64UnaryFoldingEnabled operator))
+
+	(I64 (EvaluateI64Unary operator source))
+)
+
+(rule 2
+	(SimplifyInteger
+		(IntegerBinaryOperation
+			(I64 left)
+			(I64 right)
+			(IntegerType.I64)
+			operator
+		)
+	)
+	(if-let true (I64BinaryFoldingEnabled operator))
+
+	(I64 (EvaluateI64Binary operator left right))
+)
+
+(rule 1
+	(SimplifyInteger
+		(IntegerAdd
+			(IntegerAdd source (I64 left_constant) (IntegerType.I64))
+			(I64 right_constant)
+		 (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReassociateI64Constants)))
+
+	(IntegerAdd source (I64 (EvaluateI64Binary (IntegerBinaryOperator.Add) left_constant right_constant)) (IntegerType.I64))
+)
+
+(rule 1
+	(SimplifyInteger
+		(IntegerSubtract
+			(IntegerAdd source (I64 left_constant) (IntegerType.I64))
+			(I64 right_constant)
+		 (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReassociateI64Constants)))
+
+	(IntegerAdd source (I64 (EvaluateI64Binary (IntegerBinaryOperator.Subtract) left_constant right_constant)) (IntegerType.I64))
+)
+
+(rule 1
+	(SimplifyInteger
+		(IntegerSubtract
+			(IntegerSubtract source (I64 left_constant) (IntegerType.I64))
+			(I64 right_constant)
+		 (IntegerType.I64))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReassociateI64Constants)))
+
+	(IntegerSubtract source (I64 (EvaluateI64Binary (IntegerBinaryOperator.Add) left_constant right_constant)) (IntegerType.I64))
+)
+
+(rule 7
+	(SimplifyInteger
+		(IntegerCompareOperation
+			(I64 left)
+			(I64 right)
+			(IntegerType.I64)
+			operator
+		)
+	)
+	(if-let true (I64ComparisonFoldingEnabled operator))
+
+	(I32 (EvaluateI64Comparison operator left right))
+)
+
+(rule 6
+	(SimplifyInteger
+		(IntegerCompareOperation source source (IntegerType.I64) (IntegerCompareOperator.Equal))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldReflexiveI64Comparison)))
+
+	(I32 1)
+)
+
+(rule 6
+	(SimplifyInteger
+		(IntegerCompareOperation source source (IntegerType.I64) (IntegerCompareOperator.NotEqual))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldReflexiveI64Comparison)))
+
+	(I32 0)
+)
+
+(rule 6
+	(SimplifyInteger
+		(IntegerCompareOperation source source (IntegerType.I64) (IntegerCompareOperator.LessThan _))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldReflexiveI64Comparison)))
+
+	(I32 0)
+)
+
+(rule 6
+	(SimplifyInteger
+		(IntegerCompareOperation source source (IntegerType.I64) (IntegerCompareOperator.LessThanEqual _))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldReflexiveI64Comparison)))
+
+	(I32 1)
+)
+
+(rule 4
+	(SimplifyInteger
+		(IntegerBinaryOperation source source (IntegerType.I64) (IntegerBinaryOperator.And))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64AndIdentity)))
+
+	source
+)
+
+(rule 4
+	(SimplifyInteger
+		(IntegerBinaryOperation source source (IntegerType.I64) (IntegerBinaryOperator.Or))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceI64OrIdentity)))
+
+	source
+)

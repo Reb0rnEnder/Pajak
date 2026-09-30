@@ -1,0 +1,132 @@
+(type Bit32BinaryOperator extern
+	(enum
+		(And)
+		(Or)
+		(ExclusiveOr)
+		(ShiftLeft)
+		(ShiftRightUnsigned)
+		(ShiftRightSigned)
+		(RotateLeft)
+		(RotateRight)
+	)
+)
+
+(type Bit32UnaryOperator extern
+	(enum
+		(CountLeadingZeros)
+		(CountTrailingZeros)
+	)
+)
+
+(decl Bit32BinaryOperation (Link Link Bit32BinaryOperator) Link)
+(extern extractor Bit32BinaryOperation get_bit32_binary_operation)
+(extern constructor Bit32BinaryOperation add_bit32_binary_operation)
+
+(decl Bit32UnaryOperation (Link Bit32UnaryOperator) Link)
+(extern extractor Bit32UnaryOperation get_bit32_unary_operation)
+
+(decl CanonicalBit32 (Link) Link)
+(extern extractor CanonicalBit32 get_bit32_canonical)
+
+(decl pure partial FuseBit32Binary (Bit32BinaryOperator i32 i32) i32)
+(extern constructor FuseBit32Binary fuse_bit32_binary)
+
+(decl pure EvaluateBit32Binary (Bit32BinaryOperator i32 i32) i32)
+(extern constructor EvaluateBit32Binary evaluate_bit32_binary)
+
+(decl pure EvaluateBit32Unary (Bit32UnaryOperator i32) i32)
+(extern constructor EvaluateBit32Unary evaluate_bit32_unary)
+
+(decl pure partial HasBit32ZeroIdentity (Bit32BinaryOperator) bool)
+
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.Or)) true)
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.ExclusiveOr)) true)
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.ShiftLeft)) true)
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.ShiftRightUnsigned)) true)
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.ShiftRightSigned)) true)
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.RotateLeft)) true)
+(rule (HasBit32ZeroIdentity (Bit32BinaryOperator.RotateRight)) true)
+
+(decl partial SimplifyLuauBit32 (Link) Link)
+
+(rule 5
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation
+			(Bit32BinaryOperation source (I32 first) operator)
+			(I32 second)
+			operator
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FuseLuauBit32Constants)))
+	(if-let fused (FuseBit32Binary operator first second))
+
+	(Bit32BinaryOperation source (I32 fused) operator)
+)
+
+(rule 4
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation (I32 left) (I32 right) operator)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauBit32Constants)))
+
+	(I32 (EvaluateBit32Binary operator left right))
+)
+
+(rule 6
+	(SimplifyLuauBit32
+		(Bit32UnaryOperation (I32 source) operator)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauBit32Unary)))
+
+	(I32 (EvaluateBit32Unary operator source))
+)
+
+(rule 3
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation value value (Bit32BinaryOperator.ExclusiveOr))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauBit32ExclusiveOr)))
+
+	(I32 0)
+)
+
+(rule 2
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation _ (I32 0) (Bit32BinaryOperator.And))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauBit32And)))
+
+	(I32 0)
+)
+
+(rule 2
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation _ (I32 -1) (Bit32BinaryOperator.Or))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauBit32Or)))
+
+	(I32 -1)
+)
+
+(rule 1
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation
+			(CanonicalBit32 source)
+			(I32 -1)
+			(Bit32BinaryOperator.And)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceCanonicalLuauBit32And)))
+
+	source
+)
+
+(rule 1
+	(SimplifyLuauBit32
+		(Bit32BinaryOperation (CanonicalBit32 source) (I32 0) operator)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceCanonicalLuauBit32Zero)))
+	(if-let true (HasBit32ZeroIdentity operator))
+
+	source
+)

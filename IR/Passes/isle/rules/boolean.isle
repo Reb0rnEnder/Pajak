@@ -1,0 +1,258 @@
+(decl partial SimplifyBoolean (Link) Link)
+
+(rule 31
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			(IntegerWiden boolean @ (ExactBoolean _))
+			(I64 0)
+			(IntegerType.I64)
+			(IntegerCompareOperator.Equal)
+		)
+	)
+	(if-let true (DirectComplementBooleanEnabled boolean))
+
+	(DirectComplementBoolean boolean)
+)
+
+(rule 30
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			(IntegerWiden boolean @ (ExactBoolean _))
+			(I64 constant)
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceI32BooleanTable
+		boolean
+		(EvaluateI64Comparison operator 0 constant)
+		(EvaluateI64Comparison operator 1 constant)
+	)
+)
+
+(rule 29
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			(I64 constant)
+			(IntegerWiden boolean @ (ExactBoolean _))
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceI32BooleanTable
+		boolean
+		(EvaluateI64Comparison operator constant 0)
+		(EvaluateI64Comparison operator constant 1)
+	)
+)
+
+(rule 28
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			boolean @ (ExactBoolean _)
+			(I32 0)
+			(IntegerType.I32)
+			(IntegerCompareOperator.Equal)
+		)
+	)
+
+	(DirectComplementBoolean boolean)
+)
+
+(rule 27
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			boolean @ (ExactBoolean _)
+			(I32 constant)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceI32BooleanTable
+		boolean
+		(EvaluateI32Comparison operator 0 constant)
+		(EvaluateI32Comparison operator 1 constant)
+	)
+)
+
+(rule 26
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			(I32 constant)
+			boolean @ (ExactBoolean _)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceI32BooleanTable
+		boolean
+		(EvaluateI32Comparison operator constant 0)
+		(EvaluateI32Comparison operator constant 1)
+	)
+)
+
+(rule 24
+	(SimplifyBoolean
+		(IntegerBinaryOperation
+			boolean @ (ExactBoolean _)
+			(I32 constant)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceI32BooleanTable
+		boolean
+		(EvaluateI32Binary operator 0 constant)
+		(EvaluateI32Binary operator 1 constant)
+	)
+)
+
+(rule 23
+	(SimplifyBoolean
+		(IntegerBinaryOperation
+			(I32 constant)
+			boolean @ (ExactBoolean _)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceI32BooleanTable
+		boolean
+		(EvaluateI32Binary operator constant 0)
+		(EvaluateI32Binary operator constant 1)
+	)
+)
+
+(rule 22
+	(SimplifyBoolean
+		(IntegerUnaryOperation
+			boolean @ (ExactBoolean _)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceBooleanUnaryOperation boolean operator)
+)
+
+(rule 20
+	(SimplifyBoolean
+		(IntegerBinaryOperation
+			(IntegerWiden boolean @ (ExactBoolean _))
+			(I64 constant)
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceI64BooleanTable
+		boolean
+		(EvaluateI64Binary operator 0 constant)
+		(EvaluateI64Binary operator 1 constant)
+	)
+)
+
+(rule 19
+	(SimplifyBoolean
+		(IntegerBinaryOperation
+			(I64 constant)
+			(IntegerWiden boolean @ (ExactBoolean _))
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceI64BooleanTable
+		boolean
+		(EvaluateI64Binary operator constant 0)
+		(EvaluateI64Binary operator constant 1)
+	)
+)
+
+(rule 18
+	(SimplifyBoolean
+		(IntegerUnaryOperation
+			(IntegerWiden boolean @ (ExactBoolean _))
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceWidenedBooleanUnaryOperation boolean operator)
+)
+
+(rule 32
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			(IntegerWiden left_boolean @ (ExactBoolean _))
+			(IntegerWiden right_boolean @ (ExactBoolean _))
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceWidenedBooleanComparisonPair left_boolean right_boolean operator)
+)
+
+(rule 29
+	(SimplifyBoolean
+		(IntegerCompareOperation
+			left_boolean @ (ExactBoolean _)
+			right_boolean @ (ExactBoolean _)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceBooleanComparisonPair left_boolean right_boolean operator)
+)
+
+(rule 25
+	(SimplifyBoolean
+		(IntegerBinaryOperation
+			left_boolean @ (ExactBoolean _)
+			right_boolean @ (ExactBoolean _)
+			(IntegerType.I32)
+			operator
+		)
+	)
+
+	(ReduceBooleanBinaryPair left_boolean right_boolean operator)
+)
+
+(rule 21
+	(SimplifyBoolean
+		(IntegerBinaryOperation
+			(IntegerWiden left_boolean @ (ExactBoolean _))
+			(IntegerWiden right_boolean @ (ExactBoolean _))
+			(IntegerType.I64)
+			operator
+		)
+	)
+
+	(ReduceWidenedBooleanBinaryPair left_boolean right_boolean operator)
+)
+
+(rule
+	(SimplifyBoolean
+		(NumberCompareOperation source source _ (NumberCompareOperator.LessThan))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldReflexiveNumberOrdering)))
+
+	(I32 0)
+)
+
+(rule
+	(SimplifyBoolean
+		(NumberCompareOperation source source type (NumberCompareOperator.LessThanEqual))
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldReflexiveNumberOrdering)))
+
+	(NumberCompareOperation source source type (NumberCompareOperator.Equal))
+)

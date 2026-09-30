@@ -1,0 +1,18 @@
+[package]
+name = "web-assembly-lifter"
+version = "1.0.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+ir-graph.workspace = true
+list.workspace = true
+parking_lot.workspace = true
+stacker.workspace = true
+wasmparser.workspace = true
+web-assembly-graph.workspace = true
+
+web-assembly-builder = { path = "../Builder" }
+web-assembly-liveness = { path = "../Liveness" }

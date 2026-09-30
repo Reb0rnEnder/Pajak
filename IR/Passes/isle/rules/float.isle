@@ -1,0 +1,40 @@
+(decl partial SimplifyFloat (Link) Link)
+
+(rule
+	(SimplifyFloat
+		(NumberUnaryOperation
+			(NumberUnaryOperation source type (NumberUnaryOperator.Negate))
+			type
+			(NumberUnaryOperator.Negate)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceDoubleFloatNegation)))
+
+	source
+)
+
+(rule 2
+	(SimplifyFloat
+		(NumberUnaryOperation
+			inner @ (NumberUnaryOperation _ type (NumberUnaryOperator.Absolute))
+			type
+			(NumberUnaryOperator.Absolute)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceFloatAbsolute)))
+
+	inner
+)
+
+(rule 1
+	(SimplifyFloat
+		(NumberUnaryOperation
+			(NumberUnaryOperation source type (NumberUnaryOperator.Negate))
+			type
+			(NumberUnaryOperator.Absolute)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceFloatAbsolute)))
+
+	(NumberUnaryOperation source type (NumberUnaryOperator.Absolute))
+)

@@ -13,10 +13,10 @@ local function rt_count_ones_i64(source)
 	return source
 end
 
--- SECTION leading_zeroes_i64
+-- SECTION leading_zeros_i64
 -- NEEDS bit_lshift
 -- NEEDS bit_rshift
-local function rt_leading_zeroes_i64(source)
+local function rt_leading_zeros_i64(source)
 	if source == 0LL then
 		return 64LL
 	end
@@ -55,10 +55,10 @@ local function rt_leading_zeroes_i64(source)
 	return result
 end
 
--- SECTION trailing_zeroes_i64
+-- SECTION trailing_zeros_i64
 -- NEEDS bit_lshift
 -- NEEDS bit_rshift
-local function rt_trailing_zeroes_i64(source)
+local function rt_trailing_zeros_i64(source)
 	if source == 0LL then
 		return 64LL
 	end
@@ -256,21 +256,6 @@ local function rt_less_than_u64(lhs, rhs)
 	return lhs < rhs
 end
 
--- SECTION greater_than_s64
-local function rt_greater_than_s64(lhs, rhs)
-	return lhs > rhs
-end
-
--- SECTION greater_than_u64
--- NEEDS ffi_cast
--- NEEDS u64_type
-local function rt_greater_than_u64(lhs, rhs)
-	lhs = ffi_cast(u64_type, lhs)
-	rhs = ffi_cast(u64_type, rhs)
-
-	return lhs > rhs
-end
-
 -- SECTION less_than_equal_s64
 local function rt_less_than_equal_s64(lhs, rhs)
 	return lhs <= rhs
@@ -284,21 +269,6 @@ local function rt_less_than_equal_u64(lhs, rhs)
 	rhs = ffi_cast(u64_type, rhs)
 
 	return lhs <= rhs
-end
-
--- SECTION greater_than_equal_s64
-local function rt_greater_than_equal_s64(lhs, rhs)
-	return lhs >= rhs
-end
-
--- SECTION greater_than_equal_u64
--- NEEDS ffi_cast
--- NEEDS u64_type
-local function rt_greater_than_equal_u64(lhs, rhs)
-	lhs = ffi_cast(u64_type, lhs)
-	rhs = ffi_cast(u64_type, rhs)
-
-	return lhs >= rhs
 end
 
 -- SECTION narrow_i64

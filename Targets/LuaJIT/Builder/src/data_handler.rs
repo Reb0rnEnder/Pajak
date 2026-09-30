@@ -1,416 +1,642 @@
-use alloc::vec::Vec;
-use data_flow_graph::{Link, base, control};
+use alloc::sync::Arc;
+
 use hashbrown::HashMap;
-use luajit_tree::{
-	expression::{
-		BooleanToInteger, Call, Expression, Function, GlobalGet, GlobalNew, Import,
-		IntegerBinaryOperation, IntegerCompareOperation, IntegerConvertToNumber, IntegerExtend,
-		IntegerNarrow, IntegerTransmuteToNumber, IntegerUnaryOperation, IntegerWiden, Local,
-		Location, MemoryGrow, MemoryLoad, MemorySize, Name, NumberBinaryOperation,
-		NumberCompareOperation, NumberNarrow, NumberTransmuteToInteger, NumberTruncateToInteger,
-		NumberUnaryOperation, NumberWiden, RefIsNull, Scoped, TableGet, TableGrow, TableNew,
-		TableSize,
-	},
-	statement::{Export, Sequence},
+
+use ir_allocator::DEFERRED;
+use ir_graph::{
+	Link,
+	operation::{self, ExtendType, Import, LoadType, StoreType, integer, number},
+};
+use luajit_tree::expression::{
+	Aggregate, Apply, BooleanToInteger, Expression, Extract, Field, Index, Infix, Local, MemoryNew,
+	Name, Prefix, RefIsNull, TableNew,
 };
 
-use crate::local_allocator::Declarations;
+use super::policy::PHYSICAL_REGISTERS;
+
+fn register_to_local(register: u32) -> Local {
+	if register < PHYSICAL_REGISTERS {
+		Local::Fast {
+			name: Name { id: register },
+		}
+	} else {
+		let offset = u16::try_from(register - PHYSICAL_REGISTERS).unwrap();
+
+		Local::Slow { offset }
+	}
+}
+
+const fn integer_unary_name(node: &integer::UnaryOperation) -> &'static str {
+	match (node.kind, node.operator) {
+		(integer::Type::I32, integer::UnaryOperator::CountOnes) => "rt_count_ones_i32",
+		(integer::Type::I32, integer::UnaryOperator::LeadingZeros) => "rt_leading_zeros_i32",
+		(integer::Type::I32, integer::UnaryOperator::TrailingZeros) => "rt_trailing_zeros_i32",
+		(integer::Type::I64, integer::UnaryOperator::CountOnes) => "rt_count_ones_i64",
+		(integer::Type::I64, integer::UnaryOperator::LeadingZeros) => "rt_leading_zeros_i64",
+		(integer::Type::I64, integer::UnaryOperator::TrailingZeros) => "rt_trailing_zeros_i64",
+	}
+}
+
+#[expect(
+	clippy::too_many_lines,
+	reason = "exhaustive match over integer binary operators"
+)]
+const fn integer_binary_name(node: &integer::BinaryOperation) -> &'static str {
+	match (node.kind, node.operator) {
+		(integer::Type::I32, integer::BinaryOperator::Add) => "rt_add_i32",
+		(integer::Type::I32, integer::BinaryOperator::Subtract) => "rt_subtract_i32",
+		(integer::Type::I32, integer::BinaryOperator::Multiply) => "rt_multiply_i32",
+		(integer::Type::I32, integer::BinaryOperator::Divide { is_signed: true }) => {
+			"rt_divide_s32"
+		}
+		(integer::Type::I32, integer::BinaryOperator::Divide { is_signed: false }) => {
+			"rt_divide_u32"
+		}
+		(integer::Type::I32, integer::BinaryOperator::Remainder { is_signed: true }) => {
+			"rt_remainder_s32"
+		}
+		(integer::Type::I32, integer::BinaryOperator::Remainder { is_signed: false }) => {
+			"rt_remainder_u32"
+		}
+		(integer::Type::I32, integer::BinaryOperator::And) => "rt_and_i32",
+		(integer::Type::I32, integer::BinaryOperator::Or) => "rt_or_i32",
+		(integer::Type::I32, integer::BinaryOperator::ExclusiveOr) => "rt_exclusive_or_i32",
+		(integer::Type::I32, integer::BinaryOperator::ShiftLeft) => "rt_shift_left_i32",
+		(integer::Type::I32, integer::BinaryOperator::ShiftRight { is_signed: true }) => {
+			"rt_shift_right_s32"
+		}
+		(integer::Type::I32, integer::BinaryOperator::ShiftRight { is_signed: false }) => {
+			"rt_shift_right_u32"
+		}
+		(integer::Type::I32, integer::BinaryOperator::RotateLeft) => "rt_rotate_left_i32",
+		(integer::Type::I32, integer::BinaryOperator::RotateRight) => "rt_rotate_right_i32",
+		(integer::Type::I64, integer::BinaryOperator::Add) => "rt_add_i64",
+		(integer::Type::I64, integer::BinaryOperator::Subtract) => "rt_subtract_i64",
+		(integer::Type::I64, integer::BinaryOperator::Multiply) => "rt_multiply_i64",
+		(integer::Type::I64, integer::BinaryOperator::Divide { is_signed: true }) => {
+			"rt_divide_s64"
+		}
+		(integer::Type::I64, integer::BinaryOperator::Divide { is_signed: false }) => {
+			"rt_divide_u64"
+		}
+		(integer::Type::I64, integer::BinaryOperator::Remainder { is_signed: true }) => {
+			"rt_remainder_s64"
+		}
+		(integer::Type::I64, integer::BinaryOperator::Remainder { is_signed: false }) => {
+			"rt_remainder_u64"
+		}
+		(integer::Type::I64, integer::BinaryOperator::And) => "rt_and_i64",
+		(integer::Type::I64, integer::BinaryOperator::Or) => "rt_or_i64",
+		(integer::Type::I64, integer::BinaryOperator::ExclusiveOr) => "rt_exclusive_or_i64",
+		(integer::Type::I64, integer::BinaryOperator::ShiftLeft) => "rt_shift_left_i64",
+		(integer::Type::I64, integer::BinaryOperator::ShiftRight { is_signed: true }) => {
+			"rt_shift_right_s64"
+		}
+		(integer::Type::I64, integer::BinaryOperator::ShiftRight { is_signed: false }) => {
+			"rt_shift_right_u64"
+		}
+		(integer::Type::I64, integer::BinaryOperator::RotateLeft) => "rt_rotate_left_i64",
+		(integer::Type::I64, integer::BinaryOperator::RotateRight) => "rt_rotate_right_i64",
+	}
+}
+
+const fn integer_compare_name(node: &integer::CompareOperation) -> &'static str {
+	match (node.kind, node.operator) {
+		(integer::Type::I32, integer::CompareOperator::Equal) => "rt_equal_i32",
+		(integer::Type::I32, integer::CompareOperator::NotEqual) => "rt_not_equal_i32",
+		(integer::Type::I32, integer::CompareOperator::LessThan { is_signed: true }) => {
+			"rt_less_than_s32"
+		}
+		(integer::Type::I32, integer::CompareOperator::LessThan { is_signed: false }) => {
+			"rt_less_than_u32"
+		}
+		(integer::Type::I32, integer::CompareOperator::LessThanEqual { is_signed: true }) => {
+			"rt_less_than_equal_s32"
+		}
+		(integer::Type::I32, integer::CompareOperator::LessThanEqual { is_signed: false }) => {
+			"rt_less_than_equal_u32"
+		}
+		(integer::Type::I64, integer::CompareOperator::Equal) => "rt_equal_i64",
+		(integer::Type::I64, integer::CompareOperator::NotEqual) => "rt_not_equal_i64",
+		(integer::Type::I64, integer::CompareOperator::LessThan { is_signed: true }) => {
+			"rt_less_than_s64"
+		}
+		(integer::Type::I64, integer::CompareOperator::LessThan { is_signed: false }) => {
+			"rt_less_than_u64"
+		}
+		(integer::Type::I64, integer::CompareOperator::LessThanEqual { is_signed: true }) => {
+			"rt_less_than_equal_s64"
+		}
+		(integer::Type::I64, integer::CompareOperator::LessThanEqual { is_signed: false }) => {
+			"rt_less_than_equal_u64"
+		}
+	}
+}
+
+const fn integer_extend_name(node: &operation::IntegerSignExtend) -> &'static str {
+	match node.kind {
+		ExtendType::I32_S8 => "rt_extend_s8_to_i32",
+		ExtendType::I32_S16 => "rt_extend_s16_to_i32",
+		ExtendType::I64_S8 => "rt_extend_s8_to_i64",
+		ExtendType::I64_S16 => "rt_extend_s16_to_i64",
+		ExtendType::I64_S32 => "rt_extend_s32_to_i64",
+	}
+}
+
+const fn integer_convert_name(node: &operation::IntegerConvertToNumber) -> &'static str {
+	match (node.from, node.to, node.is_signed) {
+		(integer::Type::I32, number::Type::F32, true) => "rt_convert_s32_to_f32",
+		(integer::Type::I32, number::Type::F32, false) => "rt_convert_u32_to_f32",
+		(integer::Type::I32, number::Type::F64, true) => "rt_convert_s32_to_f64",
+		(integer::Type::I32, number::Type::F64, false) => "rt_convert_u32_to_f64",
+		(integer::Type::I64, number::Type::F32, true) => "rt_convert_s64_to_f32",
+		(integer::Type::I64, number::Type::F32, false) => "rt_convert_u64_to_f32",
+		(integer::Type::I64, number::Type::F64, true) => "rt_convert_s64_to_f64",
+		(integer::Type::I64, number::Type::F64, false) => "rt_convert_u64_to_f64",
+	}
+}
+
+const fn integer_transmute_name(node: &operation::IntegerTransmuteToNumber) -> &'static str {
+	match node.from {
+		integer::Type::I32 => "rt_transmute_i32_to_f32",
+		integer::Type::I64 => "rt_transmute_i64_to_f64",
+	}
+}
+
+const fn number_unary_name(node: &number::UnaryOperation) -> &'static str {
+	match (node.kind, node.operator) {
+		(number::Type::F32, number::UnaryOperator::Absolute) => "rt_absolute_f32",
+		(number::Type::F32, number::UnaryOperator::Negate) => "rt_negate_f32",
+		(number::Type::F32, number::UnaryOperator::SquareRoot) => "rt_square_root_f32",
+		(number::Type::F32, number::UnaryOperator::RoundUp) => "rt_round_up_f32",
+		(number::Type::F32, number::UnaryOperator::RoundDown) => "rt_round_down_f32",
+		(number::Type::F32, number::UnaryOperator::Truncate) => "rt_truncate_f32",
+		(number::Type::F32, number::UnaryOperator::Nearest) => "rt_nearest_f32",
+		(number::Type::F64, number::UnaryOperator::Absolute) => "rt_absolute_f64",
+		(number::Type::F64, number::UnaryOperator::Negate) => "rt_negate_f64",
+		(number::Type::F64, number::UnaryOperator::SquareRoot) => "rt_square_root_f64",
+		(number::Type::F64, number::UnaryOperator::RoundUp) => "rt_round_up_f64",
+		(number::Type::F64, number::UnaryOperator::RoundDown) => "rt_round_down_f64",
+		(number::Type::F64, number::UnaryOperator::Truncate) => "rt_truncate_f64",
+		(number::Type::F64, number::UnaryOperator::Nearest) => "rt_nearest_f64",
+	}
+}
+
+const fn number_binary_name(node: &number::BinaryOperation) -> &'static str {
+	match (node.kind, node.operator) {
+		(number::Type::F32, number::BinaryOperator::Add) => "rt_add_f32",
+		(number::Type::F32, number::BinaryOperator::Subtract) => "rt_subtract_f32",
+		(number::Type::F32, number::BinaryOperator::Multiply) => "rt_multiply_f32",
+		(number::Type::F32, number::BinaryOperator::Divide) => "rt_divide_f32",
+		(number::Type::F32, number::BinaryOperator::Minimum) => "rt_minimum_f32",
+		(number::Type::F32, number::BinaryOperator::Maximum) => "rt_maximum_f32",
+		(number::Type::F32, number::BinaryOperator::CopySign) => "rt_copy_sign_f32",
+		(number::Type::F64, number::BinaryOperator::Add) => "rt_add_f64",
+		(number::Type::F64, number::BinaryOperator::Subtract) => "rt_subtract_f64",
+		(number::Type::F64, number::BinaryOperator::Multiply) => "rt_multiply_f64",
+		(number::Type::F64, number::BinaryOperator::Divide) => "rt_divide_f64",
+		(number::Type::F64, number::BinaryOperator::Minimum) => "rt_minimum_f64",
+		(number::Type::F64, number::BinaryOperator::Maximum) => "rt_maximum_f64",
+		(number::Type::F64, number::BinaryOperator::CopySign) => "rt_copy_sign_f64",
+	}
+}
+
+const fn number_compare_name(node: &number::CompareOperation) -> &'static str {
+	match (node.kind, node.operator) {
+		(number::Type::F32, number::CompareOperator::Equal) => "rt_equal_f32",
+		(number::Type::F32, number::CompareOperator::NotEqual) => "rt_not_equal_f32",
+		(number::Type::F32, number::CompareOperator::LessThan) => "rt_less_than_f32",
+		(number::Type::F32, number::CompareOperator::LessThanEqual) => "rt_less_than_equal_f32",
+		(number::Type::F64, number::CompareOperator::Equal) => "rt_equal_f64",
+		(number::Type::F64, number::CompareOperator::NotEqual) => "rt_not_equal_f64",
+		(number::Type::F64, number::CompareOperator::LessThan) => "rt_less_than_f64",
+		(number::Type::F64, number::CompareOperator::LessThanEqual) => "rt_less_than_equal_f64",
+	}
+}
+
+const fn number_truncate_name(node: &operation::NumberTruncateToInteger) -> &'static str {
+	match (node.from, node.to, node.is_signed, node.is_saturating) {
+		(number::Type::F32, integer::Type::I32, true, true) => "rt_saturate_f32_to_s32",
+		(number::Type::F32, integer::Type::I32, true, false) => "rt_truncate_f32_to_s32",
+		(number::Type::F32, integer::Type::I32, false, true) => "rt_saturate_f32_to_u32",
+		(number::Type::F32, integer::Type::I32, false, false) => "rt_truncate_f32_to_u32",
+		(number::Type::F32, integer::Type::I64, true, true) => "rt_saturate_f32_to_s64",
+		(number::Type::F32, integer::Type::I64, true, false) => "rt_truncate_f32_to_s64",
+		(number::Type::F32, integer::Type::I64, false, true) => "rt_saturate_f32_to_u64",
+		(number::Type::F32, integer::Type::I64, false, false) => "rt_truncate_f32_to_u64",
+		(number::Type::F64, integer::Type::I32, true, true) => "rt_saturate_f64_to_s32",
+		(number::Type::F64, integer::Type::I32, true, false) => "rt_truncate_f64_to_s32",
+		(number::Type::F64, integer::Type::I32, false, true) => "rt_saturate_f64_to_u32",
+		(number::Type::F64, integer::Type::I32, false, false) => "rt_truncate_f64_to_u32",
+		(number::Type::F64, integer::Type::I64, true, true) => "rt_saturate_f64_to_s64",
+		(number::Type::F64, integer::Type::I64, true, false) => "rt_truncate_f64_to_s64",
+		(number::Type::F64, integer::Type::I64, false, true) => "rt_saturate_f64_to_u64",
+		(number::Type::F64, integer::Type::I64, false, false) => "rt_truncate_f64_to_u64",
+	}
+}
+
+const fn number_transmute_name(node: &operation::NumberTransmuteToInteger) -> &'static str {
+	match node.from {
+		number::Type::F32 => "rt_transmute_f32_to_i32",
+		number::Type::F64 => "rt_transmute_f64_to_i64",
+	}
+}
+
+const fn memory_load_name(kind: LoadType) -> &'static str {
+	match kind {
+		LoadType::I32_S8 => "rt_load_i32_from_s8",
+		LoadType::I32_U8 => "rt_load_i32_from_u8",
+		LoadType::I32_S16 => "rt_load_i32_from_s16",
+		LoadType::I32_U16 => "rt_load_i32_from_u16",
+		LoadType::I32 => "rt_load_i32",
+		LoadType::I64_S8 => "rt_load_i64_from_s8",
+		LoadType::I64_U8 => "rt_load_i64_from_u8",
+		LoadType::I64_S16 => "rt_load_i64_from_s16",
+		LoadType::I64_U16 => "rt_load_i64_from_u16",
+		LoadType::I64_S32 => "rt_load_i64_from_s32",
+		LoadType::I64_U32 => "rt_load_i64_from_u32",
+		LoadType::I64 => "rt_load_i64",
+		LoadType::F32 => "rt_load_f32",
+		LoadType::F64 => "rt_load_f64",
+	}
+}
+
+pub const fn memory_store_name(kind: StoreType) -> &'static str {
+	match kind {
+		StoreType::I32_I8 => "rt_store_i32_into_i8",
+		StoreType::I32_I16 => "rt_store_i32_into_i16",
+		StoreType::I32 => "rt_store_i32",
+		StoreType::I64_I8 => "rt_store_i64_into_i8",
+		StoreType::I64_I16 => "rt_store_i64_into_i16",
+		StoreType::I64_I32 => "rt_store_i64_into_i32",
+		StoreType::I64 => "rt_store_i64",
+		StoreType::F32 => "rt_store_f32",
+		StoreType::F64 => "rt_store_f64",
+	}
+}
+
+pub fn build_import(node: &Import) -> Expression {
+	let arguments = [
+		Expression::String(Arc::clone(&node.namespace)),
+		Expression::String(Arc::clone(&node.identifier)),
+	];
+
+	Expression::Apply2Arguments(
+		Apply {
+			name: "rt_import",
+			arguments,
+		}
+		.into(),
+	)
+}
 
 pub struct DataHandler {
-	declarations: HashMap<u32, Declarations>,
-	assignments: HashMap<Link, Local>,
-
-	expressions: HashMap<u32, Expression>,
+	arena: ir_allocator::Arena,
+	deferred_expressions: HashMap<(u32, u32), Expression>,
 }
 
 impl DataHandler {
+	#[must_use]
 	pub fn new() -> Self {
 		Self {
-			declarations: HashMap::new(),
-			assignments: HashMap::new(),
-
-			expressions: HashMap::new(),
+			arena: ir_allocator::Arena::new(),
+			deferred_expressions: HashMap::new(),
 		}
 	}
 
-	pub const fn locals_mut(
-		&mut self,
-	) -> (&mut HashMap<u32, Declarations>, &mut HashMap<Link, Local>) {
-		(&mut self.declarations, &mut self.assignments)
+	pub fn install(&mut self, arena: ir_allocator::Arena) {
+		self.arena = arena;
 	}
 
-	pub fn store_expression(&mut self, id: u32, source: Expression) {
-		self.expressions
-			.try_insert(id, source)
-			.unwrap_or_else(|_| panic!("expression should set only once"));
+	#[must_use]
+	pub fn node_count(&self, region: u32) -> usize {
+		self.arena.node_count(region)
 	}
 
-	pub fn get_stack_size(&self, id: u32) -> u16 {
-		self.declarations[&id].stack
+	#[must_use]
+	pub fn is_deferred(&self, region: u32, id: u32) -> bool {
+		self.arena.register(region, Link(id, 0)) == DEFERRED
 	}
 
-	pub fn get_local(&self, link: Link) -> Option<Local> {
-		self.assignments.get(&link).copied()
+	pub fn store(&mut self, region: u32, id: u32, expression: Expression) {
+		self.deferred_expressions.insert((region, id), expression);
 	}
 
-	pub fn load(&mut self, link: Link) -> Expression {
-		self.get_local(link).map_or_else(
-			|| {
-				assert_eq!(link.1, 0, "expression should load from first port");
-
-				self.expressions.remove(&link.0).unwrap()
-			},
-			Expression::Local,
-		)
+	#[must_use]
+	pub fn local_of(&self, region: u32, link: Link) -> Local {
+		register_to_local(self.arena.register(region, link))
 	}
 
-	pub fn load_all(&mut self, sources: &[Link]) -> Vec<Expression> {
-		sources.iter().map(|&link| self.load(link)).collect()
-	}
-
-	pub fn load_name_assignments(&self, id: u32, ports: core::ops::Range<u16>) -> Vec<Name> {
-		let names = ports.map(|port| Link(id, port));
-
-		names
-			.map(|name| self.assignments[&name].into_name())
+	#[must_use]
+	pub fn port_locals(&self, region: u32, id: u32, count: u16) -> Vec<Local> {
+		(0..count)
+			.map(|port| self.local_of(region, Link(id, port)))
 			.collect()
 	}
 
-	pub fn load_local_assignments(&self, id: u32, ports: core::ops::Range<u16>) -> Vec<Local> {
-		let names = ports.map(|port| Link(id, port));
+	pub fn load(&mut self, region: u32, link: Link) -> Expression {
+		let register = self.arena.register(region, link);
 
-		names.map(|name| self.assignments[&name]).collect()
-	}
-
-	pub fn load_assign_all(&self, id: u32, sources: &[Link]) -> Vec<(Local, Local)> {
-		let destinations = (0..)
-			.map(|port| Link(id, port))
-			.map(|link| self.assignments[&link]);
-
-		let sources = sources.iter().map(|&link| self.assignments[&link]);
-
-		destinations.zip(sources).collect()
-	}
-
-	pub fn load_dependencies(
-		&mut self,
-		id: u32,
-		ports: core::ops::Range<u16>,
-		dependencies: &[Link],
-	) -> Vec<(Name, Expression)> {
-		let names = ports.map(|port| Link(id, port));
-		let iter = names.zip(dependencies).map(|(name, &dependency)| {
-			let name = self.assignments[&name].into_name();
-			let dependency = self.load(dependency);
-
-			(name, dependency)
-		});
-
-		iter.collect()
-	}
-
-	pub fn load_declarations(&self, id: u32) -> Vec<Name> {
-		let locals = self.declarations[&id].locals.clone();
-
-		locals.map(|id| Name { id }).collect()
-	}
-
-	pub fn load_returns(
-		&mut self,
-		results: &[Link],
-		function_type: &control::FunctionType,
-	) -> Vec<Expression> {
-		let returns = results.iter().map(|&name| self.load(name));
-		let len = function_type.results.len();
-
-		returns.take(len).collect()
-	}
-
-	pub fn load_scoped(
-		dependencies: Vec<(Name, Expression)>,
-		arguments: Vec<Name>,
-		locals: Vec<Name>,
-		stack: u16,
-		code: Sequence,
-		returns: Vec<Expression>,
-	) -> Expression {
-		let function = Function {
-			arguments,
-			locals,
-			stack,
-			code,
-			returns,
-		};
-
-		if dependencies.is_empty() {
-			Expression::Function(function.into())
-		} else {
-			let scoped = Scoped {
-				dependencies,
-				function,
-			};
-
-			Expression::Scoped(scoped.into())
+		if register == DEFERRED {
+			return self
+				.deferred_expressions
+				.remove(&(region, link.0))
+				.expect("a deferred port must have a stored expression");
 		}
+
+		Expression::Local(register_to_local(register))
 	}
 
-	pub fn load_import(&mut self, node: &control::Import) -> Expression {
-		let expression = Import {
-			environment: self.load(node.environment),
-			namespace: node.namespace.clone(),
-			identifier: node.identifier.clone(),
-		};
-
-		Expression::Import(expression.into())
-	}
-
-	fn load_export(&mut self, node: &control::Export) -> Export {
-		Export {
-			identifier: node.identifier.clone(),
-			source: self.load(node.reference),
-		}
-	}
-
-	pub fn load_exports(&mut self, nodes: &[control::Export]) -> Vec<Export> {
-		nodes
+	pub fn load_all(&mut self, region: u32, sources: &[Link]) -> Vec<Expression> {
+		sources
 			.iter()
-			.map(|export| self.load_export(export))
+			.map(|&link| self.load(region, link))
 			.collect()
 	}
 
-	pub fn load_call(&mut self, node: &base::Apply) -> Expression {
-		let end = node.arguments.len() - usize::from(node.states);
-		let call = Call {
-			function: self.load(node.function),
-			arguments: self.load_all(&node.arguments[..end]),
-		};
-
-		Expression::Call(call.into())
+	fn load_each<const N: usize>(&mut self, region: u32, sources: [Link; N]) -> [Expression; N] {
+		sources.map(|link| self.load(region, link))
 	}
 
-	pub fn load_ref_is_null(&mut self, node: base::RefIsNull) -> Expression {
+	pub fn build_apply_1(
+		&mut self,
+		region: u32,
+		name: &'static str,
+		sources: [Link; 1],
+	) -> Expression {
+		let arguments = self.load_each(region, sources);
+		let expression = Apply { name, arguments };
+
+		Expression::Apply1Argument(expression.into())
+	}
+
+	pub fn build_apply_2(
+		&mut self,
+		region: u32,
+		name: &'static str,
+		sources: [Link; 2],
+	) -> Expression {
+		let arguments = self.load_each(region, sources);
+		let expression = Apply { name, arguments };
+
+		Expression::Apply2Arguments(expression.into())
+	}
+
+	pub fn build_apply_3(
+		&mut self,
+		region: u32,
+		name: &'static str,
+		sources: [Link; 3],
+	) -> Expression {
+		let arguments = self.load_each(region, sources);
+		let expression = Apply { name, arguments };
+
+		Expression::Apply3Arguments(expression.into())
+	}
+
+	pub fn build_apply_4(
+		&mut self,
+		region: u32,
+		name: &'static str,
+		sources: [Link; 4],
+	) -> Expression {
+		let arguments = self.load_each(region, sources);
+		let expression = Apply { name, arguments };
+
+		Expression::Apply4Arguments(expression.into())
+	}
+
+	pub fn build_apply_5(
+		&mut self,
+		region: u32,
+		name: &'static str,
+		sources: [Link; 5],
+	) -> Expression {
+		let arguments = self.load_each(region, sources);
+		let expression = Apply { name, arguments };
+
+		Expression::Apply5Arguments(expression.into())
+	}
+
+	pub fn build_field(&mut self, region: u32, source: Link, name: &'static str) -> Expression {
+		let source = self.load(region, source);
+
+		Expression::Field(Field { source, name }.into())
+	}
+
+	pub fn build_infix(
+		&mut self,
+		region: u32,
+		operator: &'static str,
+		lhs: Link,
+		rhs: Link,
+	) -> Expression {
+		let expression = Infix {
+			operator,
+			lhs: self.load(region, lhs),
+			rhs: self.load(region, rhs),
+		};
+
+		Expression::Infix(expression.into())
+	}
+
+	pub fn build_prefix(
+		&mut self,
+		region: u32,
+		operator: &'static str,
+		source: Link,
+	) -> Expression {
+		let expression = Prefix {
+			operator,
+			source: self.load(region, source),
+		};
+
+		Expression::Prefix(expression.into())
+	}
+
+	fn wrap_boolean(source: Expression) -> Expression {
+		let expression = BooleanToInteger { source };
+
+		Expression::BooleanToInteger(expression.into())
+	}
+
+	pub fn build_boolean_to_integer(&mut self, region: u32, source: Link) -> Expression {
+		let source = self.load(region, source);
+
+		Self::wrap_boolean(source)
+	}
+
+	pub fn build_ref_is_null(&mut self, region: u32, node: operation::RefIsNull) -> Expression {
 		let expression = RefIsNull {
-			source: self.load(node.source),
+			source: self.load(region, node.source),
 		};
 
-		let boolean = BooleanToInteger {
-			source: Expression::RefIsNull(expression.into()),
-		};
-
-		Expression::BooleanToInteger(boolean.into())
+		Self::wrap_boolean(Expression::RefIsNull(expression.into()))
 	}
 
-	pub fn load_integer_unary_operation(
+	pub fn build_integer_unary_operation(
 		&mut self,
-		node: base::IntegerUnaryOperation,
+		region: u32,
+		node: integer::UnaryOperation,
 	) -> Expression {
-		let expression = IntegerUnaryOperation {
-			source: self.load(node.source),
-			r#type: node.r#type,
-			operator: node.operator,
-		};
-
-		Expression::IntegerUnaryOperation(expression.into())
+		self.build_apply_1(region, integer_unary_name(&node), [node.source])
 	}
 
-	pub fn load_integer_binary_operation(
+	pub fn build_integer_binary_operation(
 		&mut self,
-		node: base::IntegerBinaryOperation,
+		region: u32,
+		node: integer::BinaryOperation,
 	) -> Expression {
-		let expression = IntegerBinaryOperation {
-			lhs: self.load(node.lhs),
-			rhs: self.load(node.rhs),
-			r#type: node.r#type,
-			operator: node.operator,
-		};
-
-		Expression::IntegerBinaryOperation(expression.into())
+		self.build_apply_2(region, integer_binary_name(&node), [node.lhs, node.rhs])
 	}
 
-	pub fn load_integer_compare_operation(
+	pub fn build_integer_compare_operation(
 		&mut self,
-		node: base::IntegerCompareOperation,
+		region: u32,
+		node: integer::CompareOperation,
 	) -> Expression {
-		let expression = IntegerCompareOperation {
-			lhs: self.load(node.lhs),
-			rhs: self.load(node.rhs),
-			r#type: node.r#type,
-			operator: node.operator,
-		};
+		let inner = self.build_apply_2(region, integer_compare_name(&node), [node.lhs, node.rhs]);
 
-		let boolean = BooleanToInteger {
-			source: Expression::IntegerCompareOperation(expression.into()),
-		};
-
-		Expression::BooleanToInteger(boolean.into())
+		Self::wrap_boolean(inner)
 	}
 
-	pub fn load_integer_narrow(&mut self, node: base::IntegerNarrow) -> Expression {
-		let expression = IntegerNarrow {
-			source: self.load(node.source),
-		};
-
-		Expression::IntegerNarrow(expression.into())
-	}
-
-	pub fn load_integer_widen(&mut self, node: base::IntegerWiden) -> Expression {
-		let expression = IntegerWiden {
-			source: self.load(node.source),
-		};
-
-		Expression::IntegerWiden(expression.into())
-	}
-
-	pub fn load_integer_extend(&mut self, node: base::IntegerExtend) -> Expression {
-		let expression = IntegerExtend {
-			source: self.load(node.source),
-			r#type: node.r#type,
-		};
-
-		Expression::IntegerExtend(expression.into())
-	}
-
-	pub fn load_integer_convert_to_number(
+	pub fn build_integer_narrow(
 		&mut self,
-		node: base::IntegerConvertToNumber,
+		region: u32,
+		node: operation::IntegerNarrow,
 	) -> Expression {
-		let expression = IntegerConvertToNumber {
-			source: self.load(node.source),
-			signed: node.signed,
-			to: node.to,
-			from: node.from,
-		};
-
-		Expression::IntegerConvertToNumber(expression.into())
+		self.build_apply_1(region, "rt_narrow_i64", [node.source])
 	}
 
-	pub fn load_integer_transmute_to_number(
+	pub fn build_integer_widen(
 		&mut self,
-		node: base::IntegerTransmuteToNumber,
+		region: u32,
+		node: operation::IntegerWiden,
 	) -> Expression {
-		let expression = IntegerTransmuteToNumber {
-			source: self.load(node.source),
-			from: node.from,
-		};
-
-		Expression::IntegerTransmuteToNumber(expression.into())
+		self.build_apply_1(region, "rt_widen_i32", [node.source])
 	}
 
-	pub fn load_number_unary_operation(&mut self, node: base::NumberUnaryOperation) -> Expression {
-		let expression = NumberUnaryOperation {
-			source: self.load(node.source),
-			r#type: node.r#type,
-			operator: node.operator,
-		};
-
-		Expression::NumberUnaryOperation(expression.into())
-	}
-
-	pub fn load_number_binary_operation(
+	pub fn build_integer_sign_extend(
 		&mut self,
-		node: base::NumberBinaryOperation,
+		region: u32,
+		node: operation::IntegerSignExtend,
 	) -> Expression {
-		let expression = NumberBinaryOperation {
-			lhs: self.load(node.lhs),
-			rhs: self.load(node.rhs),
-			r#type: node.r#type,
-			operator: node.operator,
-		};
-
-		Expression::NumberBinaryOperation(expression.into())
+		self.build_apply_1(region, integer_extend_name(&node), [node.source])
 	}
 
-	pub fn load_number_compare_operation(
+	pub fn build_integer_convert_to_number(
 		&mut self,
-		node: base::NumberCompareOperation,
+		region: u32,
+		node: operation::IntegerConvertToNumber,
 	) -> Expression {
-		let expression = NumberCompareOperation {
-			lhs: self.load(node.lhs),
-			rhs: self.load(node.rhs),
-			r#type: node.r#type,
-			operator: node.operator,
-		};
-
-		let boolean = BooleanToInteger {
-			source: Expression::NumberCompareOperation(expression.into()),
-		};
-
-		Expression::BooleanToInteger(boolean.into())
+		self.build_apply_1(region, integer_convert_name(&node), [node.source])
 	}
 
-	pub fn load_number_narrow(&mut self, node: base::NumberNarrow) -> Expression {
-		let expression = NumberNarrow {
-			source: self.load(node.source),
-		};
-
-		Expression::NumberNarrow(expression.into())
-	}
-
-	pub fn load_number_widen(&mut self, node: base::NumberWiden) -> Expression {
-		let expression = NumberWiden {
-			source: self.load(node.source),
-		};
-
-		Expression::NumberWiden(expression.into())
-	}
-
-	pub fn load_number_truncate_to_integer(
+	pub fn build_integer_transmute_to_number(
 		&mut self,
-		node: base::NumberTruncateToInteger,
+		region: u32,
+		node: operation::IntegerTransmuteToNumber,
 	) -> Expression {
-		let expression = NumberTruncateToInteger {
-			source: self.load(node.source),
-			signed: node.signed,
-			saturate: node.saturate,
-			to: node.to,
-			from: node.from,
-		};
-
-		Expression::NumberTruncateToInteger(expression.into())
+		self.build_apply_1(region, integer_transmute_name(&node), [node.source])
 	}
 
-	pub fn load_number_transmute_to_integer(
+	pub fn build_number_unary_operation(
 		&mut self,
-		node: base::NumberTransmuteToInteger,
+		region: u32,
+		node: number::UnaryOperation,
 	) -> Expression {
-		let expression = NumberTransmuteToInteger {
-			source: self.load(node.source),
-			from: node.from,
+		self.build_apply_1(region, number_unary_name(&node), [node.source])
+	}
+
+	pub fn build_number_binary_operation(
+		&mut self,
+		region: u32,
+		node: number::BinaryOperation,
+	) -> Expression {
+		self.build_apply_2(region, number_binary_name(&node), [node.lhs, node.rhs])
+	}
+
+	pub fn build_number_compare_operation(
+		&mut self,
+		region: u32,
+		node: number::CompareOperation,
+	) -> Expression {
+		let inner = self.build_apply_2(region, number_compare_name(&node), [node.lhs, node.rhs]);
+
+		Self::wrap_boolean(inner)
+	}
+
+	pub fn build_number_narrow(
+		&mut self,
+		region: u32,
+		node: operation::NumberNarrow,
+	) -> Expression {
+		self.build_apply_1(region, "rt_narrow_f64", [node.source])
+	}
+
+	pub fn build_number_widen(&mut self, region: u32, node: operation::NumberWiden) -> Expression {
+		self.build_apply_1(region, "rt_widen_f32", [node.source])
+	}
+
+	pub fn build_number_truncate_to_integer(
+		&mut self,
+		region: u32,
+		node: operation::NumberTruncateToInteger,
+	) -> Expression {
+		self.build_apply_1(region, number_truncate_name(&node), [node.source])
+	}
+
+	pub fn build_number_transmute_to_integer(
+		&mut self,
+		region: u32,
+		node: operation::NumberTransmuteToInteger,
+	) -> Expression {
+		self.build_apply_1(region, number_transmute_name(&node), [node.source])
+	}
+
+	pub fn build_mutable_new(&mut self, region: u32, node: operation::MutableNew) -> Expression {
+		let expression = Aggregate {
+			fields: Vec::from([self.load(region, node.initializer)]),
 		};
 
-		Expression::NumberTransmuteToInteger(expression.into())
+		Expression::Aggregate(expression.into())
 	}
 
-	pub fn load_global_new(&mut self, node: base::GlobalNew) -> Expression {
-		let expression = GlobalNew {
-			initializer: self.load(node.initializer),
+	pub fn build_mutable_get(&mut self, region: u32, reference: Link) -> Expression {
+		let expression = Extract {
+			source: self.load(region, reference),
+			index: 0,
 		};
 
-		Expression::GlobalNew(expression.into())
+		Expression::Extract(expression.into())
 	}
 
-	pub fn load_global_get(&mut self, node: base::GlobalGet) -> Expression {
-		let expression = GlobalGet {
-			source: self.load(node.source),
+	pub fn build_aggregate(&mut self, region: u32, node: &operation::Aggregate) -> Expression {
+		let fields = node
+			.fields
+			.iter()
+			.map(|&link| self.load(region, link))
+			.collect();
+		let expression = Aggregate { fields };
+
+		Expression::Aggregate(expression.into())
+	}
+
+	pub fn build_extract(&mut self, region: u32, node: operation::Extract) -> Expression {
+		let expression = Extract {
+			source: self.load(region, node.source),
+			index: node.index,
 		};
 
-		Expression::GlobalGet(expression.into())
+		Expression::Extract(expression.into())
 	}
 
-	pub fn load_location(&mut self, location: base::Location) -> Location {
-		Location {
-			reference: self.load(location.reference),
-			offset: self.load(location.offset),
-		}
-	}
-
-	pub fn load_table_new(&mut self, node: &base::TableNew) -> Expression {
+	pub fn build_table_new(&mut self, region: u32, node: &operation::TableNew) -> Expression {
 		let initializer = node
 			.initializer
 			.iter()
-			.map(|&(link, offset)| (self.load(link), offset))
+			.map(|&(link, offset)| (self.load(region, link), offset))
 			.collect();
-
 		let expression = TableNew {
 			initializer,
 			minimum: node.minimum,
@@ -420,55 +646,56 @@ impl DataHandler {
 		Expression::TableNew(expression.into())
 	}
 
-	pub fn load_table_get(&mut self, node: base::TableGet) -> Expression {
-		let expression = TableGet {
-			source: self.load_location(node.source),
-		};
-
-		Expression::TableGet(expression.into())
+	pub fn build_table_get(&mut self, region: u32, reference: Link, offset: Link) -> Expression {
+		self.build_apply_2(region, "rt_table_get", [reference, offset])
 	}
 
-	pub fn load_table_size(&mut self, node: base::TableSize) -> Expression {
-		let expression = TableSize {
-			source: self.load(node.source),
-		};
-
-		Expression::TableSize(expression.into())
+	pub fn build_table_size(&mut self, region: u32, reference: Link) -> Expression {
+		self.build_apply_1(region, "rt_table_size", [reference])
 	}
 
-	pub fn load_table_grow(&mut self, node: base::TableGrow) -> Expression {
-		let expression = TableGrow {
-			destination: self.load(node.destination),
-			initializer: self.load(node.initializer),
-			size: self.load(node.size),
-		};
-
-		Expression::TableGrow(expression.into())
+	pub fn build_table_length(&mut self, region: u32, source: Link) -> Expression {
+		self.build_field(region, source, "minimum")
 	}
 
-	pub fn load_memory_load(&mut self, node: base::MemoryLoad) -> Expression {
-		let expression = MemoryLoad {
-			source: self.load_location(node.source),
-			r#type: node.r#type,
-		};
+	pub fn build_index(&mut self, region: u32, source: Link, offset: Link) -> Expression {
+		let [source, offset] = self.load_each(region, [source, offset]);
 
-		Expression::MemoryLoad(expression.into())
+		Expression::Index(Index { source, offset }.into())
 	}
 
-	pub fn load_memory_size(&mut self, node: base::MemorySize) -> Expression {
-		let expression = MemorySize {
-			source: self.load(node.source),
-		};
-
-		Expression::MemorySize(expression.into())
+	pub fn build_table_grow(
+		&mut self,
+		region: u32,
+		reference: Link,
+		initializer: Link,
+		size: Link,
+	) -> Expression {
+		self.build_apply_3(region, "rt_table_grow", [reference, initializer, size])
 	}
 
-	pub fn load_memory_grow(&mut self, node: base::MemoryGrow) -> Expression {
-		let expression = MemoryGrow {
-			destination: self.load(node.destination),
-			size: self.load(node.size),
+	pub fn build_memory_load(
+		&mut self,
+		region: u32,
+		reference: Link,
+		offset: Link,
+		kind: LoadType,
+	) -> Expression {
+		self.build_apply_2(region, memory_load_name(kind), [reference, offset])
+	}
+
+	pub fn build_memory_new(&mut self, region: u32, node: &operation::MemoryNew) -> Expression {
+		let expression = MemoryNew {
+			initializer: node.initializer.clone(),
+			size: self.load(region, node.size),
 		};
 
-		Expression::MemoryGrow(expression.into())
+		Expression::MemoryNew(expression.into())
+	}
+}
+
+impl Default for DataHandler {
+	fn default() -> Self {
+		Self::new()
 	}
 }

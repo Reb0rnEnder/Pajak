@@ -1,0 +1,2 @@
+(decl ExtractOfAggregate (Link) Link)
+(extern extractor ExtractOfAggregate get_extract_of_aggregate)

@@ -12,11 +12,11 @@ local function rt_count_ones_i32(source: number): number
 	return source
 end
 
--- SECTION leading_zeroes_i32
-local rt_leading_zeroes_i32 = bit32.countlz
+-- SECTION leading_zeros_i32
+local rt_leading_zeros_i32 = bit32.countlz
 
--- SECTION trailing_zeroes_i32
-local rt_trailing_zeroes_i32 = bit32.countrz
+-- SECTION trailing_zeros_i32
+local rt_trailing_zeros_i32 = bit32.countrz
 
 -- SECTION add_i32
 -- NEEDS bit32_or
@@ -203,20 +203,6 @@ local function rt_less_than_u32(lhs: number, rhs: number): boolean
 	return lhs < rhs
 end
 
--- SECTION greater_than_s32
--- NEEDS bit32_xor
-local function rt_greater_than_s32(lhs: number, rhs: number): boolean
-	lhs = bit32_xor(lhs, 0x8000_0000)
-	rhs = bit32_xor(rhs, 0x8000_0000)
-
-	return lhs > rhs
-end
-
--- SECTION greater_than_u32
-local function rt_greater_than_u32(lhs: number, rhs: number): boolean
-	return lhs > rhs
-end
-
 -- SECTION less_than_equal_s32
 -- NEEDS bit32_xor
 local function rt_less_than_equal_s32(lhs: number, rhs: number): boolean
@@ -229,20 +215,6 @@ end
 -- SECTION less_than_equal_u32
 local function rt_less_than_equal_u32(lhs: number, rhs: number): boolean
 	return lhs <= rhs
-end
-
--- SECTION greater_than_equal_s32
--- NEEDS bit32_xor
-local function rt_greater_than_equal_s32(lhs: number, rhs: number): boolean
-	lhs = bit32_xor(lhs, 0x8000_0000)
-	rhs = bit32_xor(rhs, 0x8000_0000)
-
-	return lhs >= rhs
-end
-
--- SECTION greater_than_equal_u32
-local function rt_greater_than_equal_u32(lhs: number, rhs: number): boolean
-	return lhs >= rhs
 end
 
 -- SECTION widen_i32

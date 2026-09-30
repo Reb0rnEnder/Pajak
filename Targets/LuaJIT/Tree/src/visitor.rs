@@ -1,73 +1,40 @@
+//! Visitor pattern implementation for traversing the `LuaJIT` tree.
+
 use core::ops::ControlFlow;
 
-use crate::{
-	LuaJITTree,
+use super::{
 	expression::{
-		BooleanToInteger, Call as ExpressionCall, Expression, Function, GlobalGet, GlobalNew,
-		Import, IntegerBinaryOperation, IntegerCompareOperation, IntegerConvertToNumber,
-		IntegerExtend, IntegerNarrow, IntegerTransmuteToNumber, IntegerUnaryOperation,
-		IntegerWiden, Location, MemoryGrow, MemoryLoad, MemorySize, NumberBinaryOperation,
-		NumberCompareOperation, NumberNarrow, NumberTransmuteToInteger, NumberTruncateToInteger,
-		NumberUnaryOperation, NumberWiden, RefIsNull, Scoped, TableGet, TableGrow, TableNew,
-		TableSize,
+		Aggregate, Apply, BooleanToInteger, Call as ExpressionCall, Expression, Extract, Field,
+		Function, Index, Infix, MemoryNew, Prefix, RefIsNull, TableNew,
 	},
 	statement::{
-		Assign, Call as StatementCall, Export, GlobalSet, Match, MemoryCopy, MemoryDrop,
-		MemoryFill, MemoryStore, Repeat, Sequence, Statement, TableCopy, TableDrop, TableFill,
-		TableSet,
+		Assign, Call as StatementCall, Match as StatementMatch, Repeat, Sequence, SetIndex,
+		Statement,
 	},
 };
 
+/// A visitor for traversing tree nodes.
 pub trait Visitor {
+	/// The output type produced when traversal is interrupted.
 	type Output;
 
+	/// Visits an expression node.
 	fn visit_expression(&mut self, expression: &Expression) -> ControlFlow<Self::Output>;
 
+	/// Visits a statement node.
 	fn visit_statement(&mut self, statement: &Statement) -> ControlFlow<Self::Output>;
 }
 
 impl Function {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			arguments: _,
-			locals: _,
-			stack: _,
-			code,
-			returns,
-		} = self;
+	/// Accepts a visitor and traverses the function.
+	pub fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		let Self { code, returns, .. } = self;
 
-		code.accept(visitor)?;
+		code.accept_unbounded(visitor)?;
 
 		returns
 			.iter()
-			.try_for_each(|r#return| r#return.accept(visitor))
-	}
-}
-
-impl Scoped {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			dependencies,
-			function,
-		} = self;
-
-		dependencies
-			.iter()
-			.try_for_each(|dependency| dependency.1.accept(visitor))?;
-
-		function.accept(visitor)
-	}
-}
-
-impl Import {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			environment,
-			namespace: _,
-			identifier: _,
-		} = self;
-
-		environment.accept(visitor)
+			.try_for_each(|inner| inner.accept_unbounded(visitor))
 	}
 }
 
@@ -78,10 +45,35 @@ impl ExpressionCall {
 			arguments,
 		} = self;
 
-		function.accept(visitor)?;
+		function.accept_unbounded(visitor)?;
 		arguments
 			.iter()
-			.try_for_each(|argument| argument.accept(visitor))
+			.try_for_each(|argument| argument.accept_unbounded(visitor))
+	}
+}
+
+impl<const N: usize> Apply<N> {
+	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		self.arguments
+			.iter()
+			.try_for_each(|argument| argument.accept_unbounded(visitor))
+	}
+}
+
+impl Infix {
+	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		let Self { lhs, rhs, .. } = self;
+
+		lhs.accept_unbounded(visitor)?;
+		rhs.accept_unbounded(visitor)
+	}
+}
+
+impl Prefix {
+	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		let Self { source, .. } = self;
+
+		source.accept_unbounded(visitor)
 	}
 }
 
@@ -89,7 +81,7 @@ impl BooleanToInteger {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
 		let Self { source } = self;
 
-		source.accept(visitor)
+		source.accept_unbounded(visitor)
 	}
 }
 
@@ -97,272 +89,73 @@ impl RefIsNull {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
 		let Self { source } = self;
 
-		source.accept(visitor)
+		source.accept_unbounded(visitor)
 	}
 }
 
-impl IntegerUnaryOperation {
+impl Aggregate {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			source,
-			r#type: _,
-			operator: _,
-		} = self;
+		let Self { fields } = self;
 
-		source.accept(visitor)
+		fields
+			.iter()
+			.try_for_each(|field| field.accept_unbounded(visitor))
 	}
 }
 
-impl IntegerBinaryOperation {
+impl Extract {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			lhs,
-			rhs,
-			r#type: _,
-			operator: _,
-		} = self;
+		let Self { source, .. } = self;
 
-		lhs.accept(visitor)?;
-		rhs.accept(visitor)
+		source.accept_unbounded(visitor)
 	}
 }
 
-impl IntegerCompareOperation {
+impl Field {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			lhs,
-			rhs,
-			r#type: _,
-			operator: _,
-		} = self;
+		let Self { source, .. } = self;
 
-		lhs.accept(visitor)?;
-		rhs.accept(visitor)
-	}
-}
-
-impl IntegerNarrow {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl IntegerWiden {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl IntegerExtend {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source, r#type: _ } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl IntegerConvertToNumber {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			source,
-			signed: _,
-			to: _,
-			from: _,
-		} = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl IntegerTransmuteToNumber {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source, from: _ } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl NumberUnaryOperation {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			source,
-			r#type: _,
-			operator: _,
-		} = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl NumberBinaryOperation {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			lhs,
-			rhs,
-			r#type: _,
-			operator: _,
-		} = self;
-
-		lhs.accept(visitor)?;
-		rhs.accept(visitor)
-	}
-}
-
-impl NumberCompareOperation {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			lhs,
-			rhs,
-			r#type: _,
-			operator: _,
-		} = self;
-
-		lhs.accept(visitor)?;
-		rhs.accept(visitor)
-	}
-}
-
-impl NumberNarrow {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl NumberWiden {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl NumberTruncateToInteger {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			source,
-			signed: _,
-			saturate: _,
-			to: _,
-			from: _,
-		} = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl NumberTransmuteToInteger {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source, from: _ } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl Location {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { reference, offset } = self;
-
-		reference.accept(visitor)?;
-		offset.accept(visitor)
-	}
-}
-
-impl GlobalNew {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { initializer } = self;
-
-		initializer.accept(visitor)
-	}
-}
-
-impl GlobalGet {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
+		source.accept_unbounded(visitor)
 	}
 }
 
 impl TableNew {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			initializer,
-			minimum: _,
-			maximum: _,
-		} = self;
+		let Self { initializer, .. } = self;
 
 		initializer
 			.iter()
-			.try_for_each(|item| item.0.accept(visitor))
+			.try_for_each(|item| item.0.accept_unbounded(visitor))
 	}
 }
 
-impl TableGet {
+impl Index {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
+		let Self { source, offset } = self;
 
-		source.accept(visitor)
+		source.accept_unbounded(visitor)?;
+		offset.accept_unbounded(visitor)
 	}
 }
 
-impl TableSize {
+impl MemoryNew {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
+		let Self { size, .. } = self;
 
-		source.accept(visitor)
-	}
-}
-
-impl TableGrow {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			initializer,
-			size,
-		} = self;
-
-		destination.accept(visitor)?;
-		initializer.accept(visitor)?;
-		size.accept(visitor)
-	}
-}
-
-impl MemoryLoad {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source, r#type: _ } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl MemorySize {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl MemoryGrow {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { destination, size } = self;
-
-		destination.accept(visitor)?;
-		size.accept(visitor)
+		size.accept_unbounded(visitor)
 	}
 }
 
 impl Expression {
+	fn accept_unbounded<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		stacker::maybe_grow(0x1_0000, 0x10_0000, || self.accept(visitor))
+	}
+
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
 		visitor.visit_expression(self)?;
 
 		match self {
+			Self::Function(function) => function.accept(visitor),
 			Self::Trap
 			| Self::Null
 			| Self::Local(_)
@@ -370,72 +163,44 @@ impl Expression {
 			| Self::I64(_)
 			| Self::F32(_)
 			| Self::F64(_)
-			| Self::MemoryNew(_) => ControlFlow::Continue(()),
+			| Self::String(_) => ControlFlow::Continue(()),
 
-			Self::Function(function) => function.accept(visitor),
-			Self::Scoped(scoped) => scoped.accept(visitor),
-			Self::Import(import) => import.accept(visitor),
 			Self::Call(call) => call.accept(visitor),
+			Self::Apply0Arguments(apply) => apply.accept(visitor),
+			Self::Apply1Argument(apply) => apply.accept(visitor),
+			Self::Apply2Arguments(apply) => apply.accept(visitor),
+			Self::Apply3Arguments(apply) => apply.accept(visitor),
+			Self::Apply4Arguments(apply) => apply.accept(visitor),
+			Self::Apply5Arguments(apply) => apply.accept(visitor),
+			Self::Infix(infix) => infix.accept(visitor),
+			Self::Prefix(prefix) => prefix.accept(visitor),
 			Self::BooleanToInteger(boolean_to_integer) => boolean_to_integer.accept(visitor),
 			Self::RefIsNull(ref_is_null) => ref_is_null.accept(visitor),
-			Self::IntegerUnaryOperation(integer_unary_operation) => {
-				integer_unary_operation.accept(visitor)
-			}
-			Self::IntegerBinaryOperation(integer_binary_operation) => {
-				integer_binary_operation.accept(visitor)
-			}
-			Self::IntegerCompareOperation(integer_compare_operation) => {
-				integer_compare_operation.accept(visitor)
-			}
-			Self::IntegerNarrow(integer_narrow) => integer_narrow.accept(visitor),
-			Self::IntegerWiden(integer_widen) => integer_widen.accept(visitor),
-			Self::IntegerExtend(integer_extend) => integer_extend.accept(visitor),
-			Self::IntegerConvertToNumber(integer_convert_to_number) => {
-				integer_convert_to_number.accept(visitor)
-			}
-			Self::IntegerTransmuteToNumber(integer_transmute_to_number) => {
-				integer_transmute_to_number.accept(visitor)
-			}
-			Self::NumberUnaryOperation(number_unary_operation) => {
-				number_unary_operation.accept(visitor)
-			}
-			Self::NumberBinaryOperation(number_binary_operation) => {
-				number_binary_operation.accept(visitor)
-			}
-			Self::NumberCompareOperation(number_compare_operation) => {
-				number_compare_operation.accept(visitor)
-			}
-			Self::NumberNarrow(number_narrow) => number_narrow.accept(visitor),
-			Self::NumberWiden(number_widen) => number_widen.accept(visitor),
-			Self::NumberTruncateToInteger(number_truncate_to_integer) => {
-				number_truncate_to_integer.accept(visitor)
-			}
-			Self::NumberTransmuteToInteger(number_transmute_to_integer) => {
-				number_transmute_to_integer.accept(visitor)
-			}
-			Self::GlobalNew(global_new) => global_new.accept(visitor),
-			Self::GlobalGet(global_get) => global_get.accept(visitor),
+			Self::Aggregate(aggregate) => aggregate.accept(visitor),
+			Self::Extract(extract) => extract.accept(visitor),
+			Self::Field(field) => field.accept(visitor),
 			Self::TableNew(table_new) => table_new.accept(visitor),
-			Self::TableGet(table_get) => table_get.accept(visitor),
-			Self::TableSize(table_size) => table_size.accept(visitor),
-			Self::TableGrow(table_grow) => table_grow.accept(visitor),
-			Self::MemoryLoad(memory_load) => memory_load.accept(visitor),
-			Self::MemorySize(memory_size) => memory_size.accept(visitor),
-			Self::MemoryGrow(memory_grow) => memory_grow.accept(visitor),
+			Self::Index(index) => index.accept(visitor),
+			Self::MemoryNew(memory_new) => memory_new.accept(visitor),
 		}
 	}
 }
 
 impl Sequence {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { list } = self;
+	fn accept_unbounded<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		stacker::maybe_grow(0x1_0000, 0x10_0000, || self.accept(visitor))
+	}
 
-		list.iter()
+	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
+		let Self { statements } = self;
+
+		statements
+			.iter()
 			.try_for_each(|statement| statement.accept(visitor))
 	}
 }
 
-impl Match {
+impl StatementMatch {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
 		let Self {
 			branches,
@@ -444,153 +209,53 @@ impl Match {
 
 		branches
 			.iter()
-			.try_for_each(|branch| branch.accept(visitor))?;
+			.try_for_each(|branch| branch.accept_unbounded(visitor))?;
 
-		condition.accept(visitor)
+		condition.accept_unbounded(visitor)
 	}
 }
 
 impl Repeat {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { code, condition } = self;
+		let Self {
+			code,
+			condition,
+			rotation,
+		} = self;
 
-		code.accept(visitor)?;
-		condition.accept(visitor)
+		code.accept_unbounded(visitor)?;
+		condition.accept_unbounded(visitor)?;
+		rotation.accept_unbounded(visitor)
 	}
 }
 
 impl Assign {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination: _,
-			source,
-		} = self;
+		let Self { source, .. } = self;
 
-		source.accept(visitor)
+		source.accept_unbounded(visitor)
 	}
 }
 
 impl StatementCall {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			function,
-			results: _,
-			arguments,
-		} = self;
+		let Self { call, .. } = self;
 
-		function.accept(visitor)?;
-		arguments
-			.iter()
-			.try_for_each(|argument| argument.accept(visitor))
+		call.accept_unbounded(visitor)
 	}
 }
 
-impl GlobalSet {
+impl SetIndex {
 	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
 		let Self {
-			destination,
-			source,
+			table,
+			offset,
+			value,
 		} = self;
 
-		destination.accept(visitor)?;
-		source.accept(visitor)
-	}
-}
-
-impl TableSet {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			source,
-		} = self;
-
-		destination.accept(visitor)?;
-		source.accept(visitor)
-	}
-}
-
-impl TableFill {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			source,
-			size,
-		} = self;
-
-		destination.accept(visitor)?;
-		source.accept(visitor)?;
-		size.accept(visitor)
-	}
-}
-
-impl TableCopy {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			source,
-			size,
-		} = self;
-
-		destination.accept(visitor)?;
-		source.accept(visitor)?;
-		size.accept(visitor)
-	}
-}
-
-impl TableDrop {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl MemoryStore {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			source,
-			r#type: _,
-		} = self;
-
-		destination.accept(visitor)?;
-		source.accept(visitor)
-	}
-}
-
-impl MemoryFill {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			byte,
-			size,
-		} = self;
-
-		destination.accept(visitor)?;
-		byte.accept(visitor)?;
-		size.accept(visitor)
-	}
-}
-
-impl MemoryCopy {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			destination,
-			source,
-			size,
-		} = self;
-
-		destination.accept(visitor)?;
-		source.accept(visitor)?;
-		size.accept(visitor)
-	}
-}
-
-impl MemoryDrop {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self { source } = self;
-
-		source.accept(visitor)
+		table.accept_unbounded(visitor)?;
+		offset.accept_unbounded(visitor)?;
+		value.accept_unbounded(visitor)
 	}
 }
 
@@ -599,47 +264,12 @@ impl Statement {
 		visitor.visit_statement(self)?;
 
 		match self {
-			Self::SwapAll(_) => ControlFlow::Continue(()),
-
-			Self::Match(r#match) => r#match.accept(visitor),
+			Self::Match(inner) => inner.accept(visitor),
 			Self::Repeat(repeat) => repeat.accept(visitor),
 			Self::Assign(assign) => assign.accept(visitor),
+			Self::SwapAll(_) => ControlFlow::Continue(()),
 			Self::Call(call) => call.accept(visitor),
-			Self::GlobalSet(global_set) => global_set.accept(visitor),
-			Self::TableSet(table_set) => table_set.accept(visitor),
-			Self::TableFill(table_fill) => table_fill.accept(visitor),
-			Self::TableCopy(table_copy) => table_copy.accept(visitor),
-			Self::TableDrop(elements_drop) => elements_drop.accept(visitor),
-			Self::MemoryStore(memory_store) => memory_store.accept(visitor),
-			Self::MemoryFill(memory_fill) => memory_fill.accept(visitor),
-			Self::MemoryCopy(memory_copy) => memory_copy.accept(visitor),
-			Self::MemoryDrop(data_drop) => data_drop.accept(visitor),
+			Self::SetIndex(set_index) => set_index.accept(visitor),
 		}
-	}
-}
-
-impl Export {
-	fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			identifier: _,
-			source,
-		} = self;
-
-		source.accept(visitor)
-	}
-}
-
-impl LuaJITTree {
-	pub fn accept<T: Visitor>(&self, visitor: &mut T) -> ControlFlow<T::Output> {
-		let Self {
-			environment: _,
-			locals: _,
-			stack: _,
-			code,
-			exports,
-		} = self;
-
-		code.accept(visitor)?;
-		exports.iter().try_for_each(|export| export.accept(visitor))
 	}
 }

@@ -1,0 +1,55 @@
+(decl IntegralLuauUnary (Link) Link)
+(extern extractor IntegralLuauUnary get_integral_luau_unary)
+
+(decl LuauExtremum (Link Link) Link)
+(extern extractor LuauExtremum get_luau_extremum)
+
+(decl partial SimplifyLuauMath (Link) Link)
+
+(rule 5
+	(SimplifyLuauMath
+		(LuauUnaryOperation
+			inner @ (LuauUnaryOperation _ (LuauUnaryOperator.Absolute))
+			(LuauUnaryOperator.Absolute)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauAbsolute)))
+
+	inner
+)
+
+(rule 4
+	(SimplifyLuauMath
+		(IntegralLuauUnary inner @ (IntegralLuauUnary _))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauIntegralUnary)))
+
+	inner
+)
+
+(rule 3
+	(SimplifyLuauMath
+		(LuauExtremum source source)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceLuauExtremum)))
+
+	source
+)
+
+(rule 2
+	(SimplifyLuauMath
+		(LuauUnaryOperation (LuauNumber source) operator)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauUnaryConstants)))
+
+	(raw_luau_number_result (EvaluateLuauUnary operator source))
+)
+
+(rule 1
+	(SimplifyLuauMath
+		(LuauBinaryOperation (LuauNumber left) (LuauNumber right) operator)
+	)
+	(if-let true (OptimizationEnabled (Optimization.FoldLuauBinaryConstants)))
+
+	(raw_luau_number_result (EvaluateLuauBinary operator left right))
+)

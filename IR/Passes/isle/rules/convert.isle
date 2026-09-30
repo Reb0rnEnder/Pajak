@@ -1,0 +1,91 @@
+(decl partial SimplifyConvert (Link) Link)
+
+(rule 9
+	(SimplifyConvert
+		(IntegerSignExtend
+			widened @ (IntegerWiden (ExactBoolean _))
+			(ExtendType.I64_S8)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceBooleanSignExtension)))
+
+	widened
+)
+
+(rule 8
+	(SimplifyConvert
+		(IntegerSignExtend
+			widened @ (IntegerWiden (ExactBoolean _))
+			(ExtendType.I64_S16)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceBooleanSignExtension)))
+
+	widened
+)
+
+(rule 7
+	(SimplifyConvert
+		(IntegerSignExtend
+			widened @ (IntegerWiden (ExactBoolean _))
+			(ExtendType.I64_S32)
+		)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceBooleanSignExtension)))
+
+	widened
+)
+
+(rule 6
+	(SimplifyConvert
+		(IntegerSignExtend boolean @ (ExactBoolean _) (ExtendType.I32_S8))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceBooleanSignExtension)))
+
+	boolean
+)
+
+(rule 5
+	(SimplifyConvert
+		(IntegerSignExtend boolean @ (ExactBoolean _) (ExtendType.I32_S16))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceBooleanSignExtension)))
+
+	boolean
+)
+
+(rule 4
+	(SimplifyConvert
+		(IntegerNarrow (IntegerWiden x))
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceNarrowWiden)))
+
+	x
+)
+
+(rule 3
+	(SimplifyConvert
+		(SignExtendIdempotent inner)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceIdempotentSignExtension)))
+
+	inner
+)
+
+(rule 2
+	(SimplifyConvert
+		(TransmuteIntRoundTrip x)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceIntegerTransmuteRoundTrip)))
+
+	x
+)
+
+(rule 1
+	(SimplifyConvert
+		(TransmuteNumberRoundTrip x)
+	)
+	(if-let true (OptimizationEnabled (Optimization.ReduceNumberTransmuteRoundTrip)))
+
+	x
+)

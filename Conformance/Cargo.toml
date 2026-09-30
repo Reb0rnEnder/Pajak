@@ -3,22 +3,24 @@ name = "conformance"
 version = "1.0.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dev-dependencies]
-data-flow-graph = { path = "../Data Flow/Graph" }
-data-flow-builder = { path = "../Data Flow/Builder" }
-data-flow-visitor = { path = "../Data Flow/Visitor" }
+ir-graph.workspace = true
+ir-passes.workspace = true
+ir-pipeline.workspace = true
+luajit-builder.workspace = true
+luajit-lower.workspace = true
+luajit-printer.workspace = true
+luau-builder.workspace = true
+luau-lower.workspace = true
+luau-printer.workspace = true
+parking_lot.workspace = true
+web-assembly-lifter.workspace = true
 
-luau-tree = { path = "../Targets/Luau/Tree" }
-luau-builder = { path = "../Targets/Luau/Builder" }
-luau-printer = { path = "../Targets/Luau/Printer" }
-
-luajit-tree = { path = "../Targets/LuaJIT/Tree" }
-luajit-builder = { path = "../Targets/LuaJIT/Builder" }
-luajit-printer = { path = "../Targets/LuaJIT/Printer" }
-
-datatest-stable = "0.3.2"
-pretty_assertions = "1.4.1"
-wast = "222.0.0"
+datatest-stable = "=0.3.3"
+wast = "=247.0.0"
 
 [[test]]
 name = "luau"
