@@ -140,26 +140,14 @@ impl Luau {
 	}
 
 	fn format_argument_i32(&mut self, value: i32) -> Result<()> {
-		let value = u32::from_ne_bytes(value.to_ne_bytes());
-
-		write!(self.file, "{value} --[[ 0x{value:08X} ]]")?;
-
+		write!(self.file, "0x{value:08X}")?;
+    
 		Ok(())
 	}
 
 	fn format_argument_i64(&mut self, value: i64) -> Result<()> {
-		let [b1, b2, b3, b4, b5, b6, b7, b8] = value.to_le_bytes();
-
-		let low_bits = u32::from_le_bytes([b1, b2, b3, b4]);
-		let high_bits = u32::from_le_bytes([b5, b6, b7, b8]);
-
-		self.references.push("into_bits_i64");
-
-		write!(
-			self.file,
-			"into_bits_i64({low_bits}, {high_bits}) --[[ 0x{value:016X} ]]"
-		)?;
-
+		write!(self.file, "0x{value:016X}i")?;
+    
 		Ok(())
 	}
 
@@ -181,11 +169,11 @@ impl Luau {
 		let low_bits = u32::from_le_bytes([b1, b2, b3, b4]);
 		let high_bits = u32::from_le_bytes([b5, b6, b7, b8]);
 
-		self.references.push("into_bits_i64");
+		self.references.push("from_halves_f64");
 
 		write!(
 			self.file,
-			"into_bits_i64({low_bits}, {high_bits}) --[[ {float}_f64 ]]"
+			"from_halves_f64({low_bits}, {high_bits}) --[[ {float}_f64 ]]"
 		)?;
 
 		Ok(())
@@ -293,32 +281,16 @@ impl Luau {
 	}
 
 	fn format_assert_equal_i32(&mut self, value: i32) -> Result<()> {
-		let value = u32::from_ne_bytes(value.to_ne_bytes());
-
 		self.references.push("assert_equal_i32");
 
-		write!(
-			self.file,
-			"hn_assert_equal_i32({value}) --[[ 0x{value:08X} ]]"
-		)?;
-
+		write!(self.file, "hn_assert_equal_i32(0x{value:08X})")?;
 		Ok(())
 	}
 
 	fn format_assert_equal_i64(&mut self, value: i64) -> Result<()> {
-		let [b1, b2, b3, b4, b5, b6, b7, b8] = value.to_le_bytes();
-
-		let low_bits = u32::from_le_bytes([b1, b2, b3, b4]);
-		let high_bits = u32::from_le_bytes([b5, b6, b7, b8]);
-
 		self.references.push("assert_equal_i64");
-		self.references.push("into_bits_i64");
 
-		write!(
-			self.file,
-			"hn_assert_equal_i64(into_bits_i64({low_bits}, {high_bits})) --[[ 0x{value:016X} ]]"
-		)?;
-
+		write!(self.file, "hn_assert_equal_i64(0x{value:016X}i)")?;
 		Ok(())
 	}
 
@@ -343,11 +315,11 @@ impl Luau {
 		let high_bits = u32::from_le_bytes([b5, b6, b7, b8]);
 
 		self.references.push("assert_equal_f64");
-		self.references.push("into_bits_i64");
+		self.references.push("from_halves_f64");
 
 		write!(
 			self.file,
-			"hn_assert_equal_f64(into_bits_i64({low_bits}, {high_bits})) --[[ {float}_f64 ]]"
+			"hn_assert_equal_f64(from_halves_f64({low_bits}, {high_bits})) --[[ {float}_f64 ]]"
 		)?;
 
 		Ok(())
