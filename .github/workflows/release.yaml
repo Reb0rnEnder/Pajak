@@ -44,12 +44,13 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --target ${{ matrix.target }} --release --verbose
+        shell: bash
+        run: cargo build --bin spider-cli --target ${{ matrix.target }} --release --verbose
 
       - name: Prepare artifacts
         shell: bash
