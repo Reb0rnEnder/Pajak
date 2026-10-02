@@ -16,6 +16,7 @@ jobs:
     name: Release - ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: Linux x64
