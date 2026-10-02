@@ -254,7 +254,9 @@ impl Print for i64 {
 
 impl Print for f32 {
 	fn print(&self, _printer: &mut LuauPrinter, out: &mut dyn Write) -> Result<()> {
-		write!(out, "0x{self:016X}i")
+		let inner = self.to_bits();
+
+		write!(out, "0x{inner:08X}")
 	}
 }
 
